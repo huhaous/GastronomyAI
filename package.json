@@ -1,0 +1,33 @@
+{
+  "name": "gastronomy-ai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "coverage": "node scripts/coverage-report.mjs",
+    "llm:serve": "ollama serve",
+    "llm:pull": "ollama pull qwen2.5:32b",
+    "llm:pull:fast": "ollama pull qwen2.5:14b",
+    "llm:pull:quality": "ollama pull qwen2.5:32b"
+  },
+  "dependencies": {
+    "next": "16.3.0",
+    "openai": "^7.4.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
