@@ -95,6 +95,12 @@ function PortionAdjustmentNote({
   adjustment: PortionAdjustment;
 }) {
   const changes = adjustment.changes ?? [];
+  const gap = adjustment.after_calories - adjustment.target_calories;
+  // A gap this size changes what the plate is for, so it gets its own sentence
+  // with the number in it rather than a reassuring aside about limits.
+  const missed =
+    adjustment.target_calories > 0 &&
+    Math.abs(gap) / adjustment.target_calories > 0.1;
 
   return (
     <div className="mt-3 border border-[var(--border)] px-4 py-3">
@@ -104,9 +110,18 @@ function PortionAdjustmentNote({
       <p className="mt-1.5 text-xs text-[var(--cream-dim)]">
         As written the dish came to {adjustment.before_calories} kcal per serving against a{" "}
         {adjustment.target_calories} kcal target, so quantities were adjusted.
-        {adjustment.bounded &&
+        {adjustment.bounded && !missed &&
           " Some ingredients hit a sensible limit, so the target is approached rather than matched."}
       </p>
+      {missed && (
+        <p className="mt-1.5 text-xs text-[var(--gold)]">
+          It still lands at {adjustment.after_calories} kcal,{" "}
+          {Math.abs(Math.round((gap / adjustment.target_calories) * 100))}%{" "}
+          {gap < 0 ? "under" : "over"} target. These ingredients cannot reach it
+          without portions that stop resembling a plate — add an energy-dense
+          ingredient, or treat this as the meal it is.
+        </p>
+      )}
       {changes.length > 0 && (
         <ul className="mt-2 space-y-1 text-xs text-[var(--cream-dim)]">
           {changes.map((change) => (
