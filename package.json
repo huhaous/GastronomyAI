@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "coverage": "node scripts/coverage-report.mjs",
+    "coverage:seed": "node scripts/coverage-seed.mjs",
     "llm:serve": "ollama serve",
     "llm:pull": "ollama pull qwen2.5:32b",
     "llm:pull:fast": "ollama pull qwen2.5:14b",
