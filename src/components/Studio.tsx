@@ -20,6 +20,8 @@ import {
   PSMF_SUMMARY,
   PSMF_TITLE,
 } from "@/lib/safety";
+import type { RecipePayload, SavedRecipe } from "@/lib/storage/recipeStore";
+import { useSavedRecipes } from "@/lib/storage/useSavedRecipes";
 import type {
   ElevatedRecipe,
   GourmetRecipe,
@@ -92,6 +94,71 @@ function FieldLabel({ children }: { children: ReactNode }) {
 const inputClass =
   "w-full border border-[var(--border)] bg-transparent px-3 py-2.5 text-sm text-[var(--cream)] outline-none transition placeholder:text-[var(--muted)] focus:border-[var(--gold-dim)]";
 
+const dateFormat = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+});
+
+/** Recipes kept in this browser. Empty until the first save, so it hides itself. */
+function KeptPlates({
+  entries,
+  activeId,
+  onOpen,
+  onRemove,
+}: {
+  entries: SavedRecipe[];
+  activeId: string | null;
+  onOpen: (entry: SavedRecipe) => void;
+  onRemove: (id: string) => void;
+}) {
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="border border-[var(--border)] px-4 py-4">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
+        Kept plates · {entries.length}
+      </p>
+      <ul className="mt-3 divide-y divide-[var(--border)]">
+        {entries.map((entry) => {
+          const active = entry.id === activeId;
+          return (
+            <li
+              key={entry.id}
+              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2"
+            >
+              <button
+                type="button"
+                onClick={() => onOpen(entry)}
+                className={`text-left text-sm transition ${
+                  active
+                    ? "text-[var(--gold)]"
+                    : "text-[var(--cream-dim)] hover:text-[var(--gold)]"
+                }`}
+              >
+                {entry.title ?? entry.payload.recipe.name}
+              </button>
+              <span className="flex items-center gap-4 text-[11px] text-[var(--muted)]">
+                <span>
+                  {Math.round(entry.payload.recipe.macros.calories)} kcal ·{" "}
+                  {dateFormat.format(new Date(entry.saved_at))}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(entry.id)}
+                  aria-label={`Remove ${entry.title ?? entry.payload.recipe.name}`}
+                  className="uppercase tracking-[0.14em] transition hover:text-red-300"
+                >
+                  Remove
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function Studio() {
   const [mode, setMode] = useState<StudioMode>("generate");
   const [modelId, setModelId] = useState<LocalModelId>(DEFAULT_LOCAL_MODEL);
@@ -103,6 +170,10 @@ export function Studio() {
   const [result, setResult] = useState<StudioResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const { entries: keptPlates, save, remove } = useSavedRecipes();
+  /** Set once the plate on screen exists in the store, so it isn't kept twice. */
+  const [keptId, setKeptId] = useState<string | null>(null);
 
   const [calories, setCalories] = useState("450");
   const [protein, setProtein] = useState("35");
@@ -158,6 +229,7 @@ export function Studio() {
       const err = data as RecipeApiError;
       throw new Error(err.details ?? err.error ?? "Generation failed");
     }
+    setKeptId(null);
     setResult(data as StudioResult);
   }
 
@@ -185,7 +257,29 @@ export function Studio() {
       const err = data as RecipeApiError;
       throw new Error(err.details ?? err.error ?? "Elevation failed");
     }
+    setKeptId(null);
     setResult(data as StudioResult);
+  }
+
+  async function keepCurrent() {
+    if (!result || keptId) return;
+    const payload: RecipePayload =
+      result.kind === "generate"
+        ? { kind: "generate", recipe: result.recipe }
+        : { kind: "elevate", recipe: result.recipe };
+    const saved = await save(payload, { model: result.model });
+    setKeptId(saved.id);
+  }
+
+  function openKept(entry: SavedRecipe) {
+    setError(null);
+    setResult({ ...entry.payload, model: entry.model });
+    setKeptId(entry.id);
+  }
+
+  async function removeKept(id: string) {
+    await remove(id);
+    if (keptId === id) setKeptId(null);
   }
 
   function onSubmit(e: FormEvent) {
@@ -601,13 +695,28 @@ export function Studio() {
         </div>
       )}
 
+      <KeptPlates
+        entries={keptPlates}
+        activeId={keptId}
+        onOpen={openKept}
+        onRemove={removeKept}
+      />
+
       {recipe && (
         <div className="space-y-8 animate-[fadeRise_0.6s_ease-out]">
-          {result?.model && (
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--muted)]">
-              Composed with {result.model}
+              {result?.model ? `Composed with ${result.model}` : "Composed"}
             </p>
-          )}
+            <button
+              type="button"
+              onClick={keepCurrent}
+              disabled={Boolean(keptId)}
+              className="border border-[var(--border)] px-4 py-2 text-[11px] uppercase tracking-[0.14em] text-[var(--cream-dim)] transition hover:border-[var(--gold-dim)] hover:text-[var(--gold)] disabled:border-[var(--border)] disabled:text-[var(--muted)]"
+            >
+              {keptId ? "Kept" : "Keep this plate"}
+            </button>
+          </div>
           <PlatingCard recipe={recipe} />
           <RecipeDetails
             recipe={recipe}
