@@ -10,6 +10,7 @@ import type {
   MacroProfile,
   MacroValidation,
   NutritionalStrategy,
+  PortionAdjustment,
   StrategyValidation,
 } from "./nutrition";
 
@@ -19,6 +20,7 @@ export type {
   MacroProfile,
   MacroValidation,
   NutritionalStrategy,
+  PortionAdjustment,
   StrategyValidation,
 } from "./nutrition";
 
@@ -158,6 +160,8 @@ export interface GourmetRecipe {
   tags?: string[];
   /** Attached post-generation by the Knowledge Graph recalculation fallback. */
   macro_validation?: MacroValidation;
+  /** Attached when quantities were rescaled to reach the requested target. */
+  portion_adjustment?: PortionAdjustment;
   /** Attached post-generation by the FAT_LOSS_RULES compliance check. */
   strategy_validation?: StrategyValidation;
 }
@@ -171,6 +175,8 @@ export interface GenerateRecipeRequest {
   time_limit_minutes: number;
   /** Fat-loss periodization strategy. */
   nutritional_strategy?: NutritionalStrategy;
+  /** Required when the strategy is deep_cut_psmf; the API refuses it otherwise. */
+  psmf_acknowledged?: boolean;
   /** Optional cuisine preference or style notes. */
   cuisine_style?: string;
   dietary_restrictions?: string[];
@@ -188,6 +194,8 @@ export interface ElevateRecipeRequest {
   kitchen_tools?: KitchenTool[];
   time_limit_minutes?: number;
   nutritional_strategy?: NutritionalStrategy;
+  /** Required when the strategy is deep_cut_psmf; the API refuses it otherwise. */
+  psmf_acknowledged?: boolean;
   dietary_restrictions?: string[];
   /** Optional Ollama/OpenAI model override (e.g. qwen2.5:32b). */
   model?: string;

@@ -54,6 +54,25 @@ export interface MacroValidation {
   delta_calories_percent: number;
 }
 
+/**
+ * Record of portions being rescaled to reach the requested target, attached
+ * when the graph verified every line and the dish was off target.
+ */
+export interface PortionAdjustment {
+  /** Requested per-serving energy. */
+  target_calories: number;
+  /** Per-serving energy the model's own quantities actually produced. */
+  before_calories: number;
+  /** Per-serving energy after rescaling. */
+  after_calories: number;
+  /** Multiplier applied to each ingredient role. */
+  factors: { group: string; factor: number }[];
+  /** One entry per rewritten line, e.g. "Chicken breast 200g → 280g". */
+  changes: string[];
+  /** True when a role hit its limit, so the target may not be fully reached. */
+  bounded: boolean;
+}
+
 /** Compliance report against FAT_LOSS_RULES for the requested strategy. */
 export interface StrategyValidation {
   strategy: NutritionalStrategy;

@@ -11,6 +11,7 @@
 import {
   FALLBACK_MEASURE_GRAMS,
   findIngredientNode,
+  isAromatic,
   type HouseholdMeasures,
 } from "@/data/knowledgeGraph";
 import type { MacroProfile } from "@/types/nutrition";
@@ -18,7 +19,7 @@ import type { MacroProfile } from "@/types/nutrition";
 /** Anything with a name and an amount. Structurally a RecipeIngredient too. */
 export interface FoodLine {
   name: string;
-  quantity: string;
+  quantity?: string;
   unit?: string;
 }
 
@@ -101,8 +102,8 @@ const UNICODE_FRACTIONS: Record<string, number> = {
  * Parse a quantity string into a number, handling the formats models actually
  * emit: "200", "200g", "1 1/2", "½", "150-200g", "2 tbsp".
  */
-export function parseAmount(raw: string): number | null {
-  let text = raw.trim().toLowerCase();
+export function parseAmount(raw: string | null | undefined): number | null {
+  let text = (raw ?? "").trim().toLowerCase();
   if (!text) return null;
 
   for (const [glyph, value] of Object.entries(UNICODE_FRACTIONS)) {
@@ -142,11 +143,11 @@ export function parseAmount(raw: string): number | null {
  * string and inline the unit in `quantity` ("200g", "2 tbsp"), so the quantity
  * string is parsed as a fallback.
  */
-function resolveUnitToken(line: FoodLine): string {
+export function resolveUnitToken(line: FoodLine): string {
   const explicit = (line.unit ?? "").trim().toLowerCase();
   if (explicit && explicit !== "-") return explicit;
 
-  const inline = line.quantity
+  const inline = (line.quantity ?? "")
     .trim()
     .toLowerCase()
     .match(/^[\d\s./–-]*\s*([a-zµ]+)/);
@@ -165,18 +166,32 @@ export type LineStatus = "verified" | "negligible" | "unresolved";
  */
 export type UnresolvedReason = "no_match" | "unparsed_quantity" | "unknown_unit";
 
+/**
+ * How the amount was expressed. Count-based lines ("2 eggs", "1 clove") resist
+ * rescaling — 1.4 eggs is not an instruction — so portion scaling leaves them
+ * alone and adjusts the weighable lines around them.
+ */
+export type UnitKind = "weight" | "volume" | "count";
+
 export interface LineAccounting {
   name: string;
   status: LineStatus;
   reason?: UnresolvedReason;
   grams?: number;
   calories: number;
+  /** Present for verified lines only. */
+  macros?: MacroProfile;
+  unitKind?: UnitKind;
+  /** Per-100g reference for the matched node, for classification upstream. */
+  per100g?: MacroProfile;
+  /** Seasoning or texture agent rather than a macro source. */
+  aromatic?: boolean;
 }
 
 /** An unpriced line, kept whole so the failure can be reproduced later. */
 export interface UnresolvedLine {
   name: string;
-  quantity: string;
+  quantity?: string;
   unit?: string;
   reason: UnresolvedReason;
 }
@@ -193,7 +208,13 @@ export interface ResolvedLine {
   reason?: UnresolvedReason;
   grams: number;
   macros: MacroProfile;
+  unitKind?: UnitKind;
+  per100g?: MacroProfile;
+  aromatic?: boolean;
 }
+
+/** Household measures that describe a countable item rather than a volume. */
+const COUNT_MEASURES = new Set(["clove", "piece"]);
 
 /** Resolve one food line to grams + macros, or mark it unresolved. */
 export function resolveFoodLine(line: FoodLine): ResolvedLine {
@@ -217,6 +238,7 @@ export function resolveFoodLine(line: FoodLine): ResolvedLine {
 
   const unit = resolveUnitToken(line);
   let grams: number | null = null;
+  let unitKind: UnitKind = "weight";
 
   if (WEIGHT_UNIT_GRAMS[unit] != null) {
     grams = amount * WEIGHT_UNIT_GRAMS[unit];
@@ -229,7 +251,10 @@ export function resolveFoodLine(line: FoodLine): ResolvedLine {
           ? FALLBACK_MEASURE_GRAMS[measure]
           : undefined;
       const perUnit = specific ?? generic;
-      if (perUnit != null) grams = amount * perUnit;
+      if (perUnit != null) {
+        grams = amount * perUnit;
+        unitKind = COUNT_MEASURES.has(measure) ? "count" : "volume";
+      }
     }
   }
 
@@ -240,13 +265,16 @@ export function resolveFoodLine(line: FoodLine): ResolvedLine {
   }
 
   if (node.negligible) {
-    return { status: "negligible", grams, macros: EMPTY_MACROS };
+    return { status: "negligible", grams, macros: EMPTY_MACROS, unitKind };
   }
 
   const factor = grams / 100;
   return {
     status: "verified",
     grams,
+    unitKind,
+    per100g: node.macroPer100g,
+    aromatic: isAromatic(node),
     macros: {
       calories: node.macroPer100g.calories * factor,
       protein_g: node.macroPer100g.protein_g * factor,
@@ -299,6 +327,10 @@ export function resolveFoodLines(lines: FoodLine[]): FoodLinesResolution {
       reason: resolved.reason,
       grams: resolved.status === "unresolved" ? undefined : round1(resolved.grams),
       calories: Math.round(resolved.macros.calories),
+      macros: resolved.status === "verified" ? resolved.macros : undefined,
+      unitKind: resolved.unitKind,
+      per100g: resolved.per100g,
+      aromatic: resolved.aromatic,
     });
   }
 

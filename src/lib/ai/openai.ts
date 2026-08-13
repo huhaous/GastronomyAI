@@ -10,6 +10,7 @@ import {
 import { NUTRITIONAL_STRATEGY_OPTIONS } from "@/lib/nutritionStrategies";
 import { buildKnowledgeGraphConstraints } from "@/lib/ai/graphContext";
 import { applyGraphRecalculation } from "@/lib/ai/nutritionRecalc";
+import { adjustPortions } from "@/lib/ai/portionAdjust";
 import { validateAgainstStrategy } from "@/lib/ai/strategyValidation";
 import { recordCoverage } from "@/lib/telemetry/coverageLog";
 import type {
@@ -17,6 +18,7 @@ import type {
   ElevatedRecipe,
   GenerateRecipeRequest,
   GourmetRecipe,
+  MacroProfile,
   NutritionalStrategy,
 } from "@/types/recipe";
 
@@ -63,8 +65,12 @@ function buildSystemMessages(params: {
 
 /**
  * Post-processing every generated recipe goes through: macros recomputed from
- * the Knowledge Graph, checked for compliance with the strategy rules, and the
- * graph's coverage of this dish logged for the ingredient backlog.
+ * the Knowledge Graph, portions rescaled toward the requested target when the
+ * dish is fully verified, then a compliance check and a coverage log entry.
+ *
+ * Rescaling happens between two verification passes on purpose — the first
+ * establishes what the model's quantities really produce, the second reprices
+ * the rewritten quantities so the reported macros describe the served plate.
  */
 function finalizeRecipe<T extends GourmetRecipe>(
   raw: T,
@@ -72,9 +78,18 @@ function finalizeRecipe<T extends GourmetRecipe>(
     mode: "generate" | "elevate";
     model: string;
     strategy?: NutritionalStrategy;
+    target?: Partial<MacroProfile>;
   }
 ): T {
-  const { recipe: verified, result } = applyGraphRecalculation(raw);
+  const firstPass = applyGraphRecalculation(raw);
+  const { recipe: scaled, adjustment } = adjustPortions(
+    firstPass.recipe,
+    context.target
+  );
+
+  const { recipe: verified, result } = adjustment
+    ? applyGraphRecalculation(scaled)
+    : firstPass;
   const effectiveStrategy = context.strategy ?? verified.nutritional_strategy;
 
   recordCoverage({
@@ -177,6 +192,7 @@ export async function generateGourmetRecipe(
     mode: "generate",
     model,
     strategy: request.nutritional_strategy,
+    target: request.target_macros,
   });
 
   return { recipe, model };
@@ -220,6 +236,7 @@ export async function elevateCravingRecipe(
       mode: "elevate",
       model,
       strategy: request.nutritional_strategy,
+      target: request.target_macros,
     })
   );
 

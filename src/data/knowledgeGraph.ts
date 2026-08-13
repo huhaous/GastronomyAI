@@ -763,6 +763,41 @@ export const FALLBACK_MEASURE_GRAMS: Pick<HouseholdMeasures, "tsp" | "tbsp" | "c
   cup: 240,
 };
 
+/**
+ * Flavor agents and texture modifiers: they carry calories, so they are priced
+ * like anything else, but they exist to season a dish rather than to feed it.
+ * Portion scaling leaves them alone — halving the garlic to hit a macro target
+ * changes the cooking and barely moves the number.
+ *
+ * Sweeteners with real energy (honey, maple syrup) are deliberately absent:
+ * they are a carbohydrate source and should scale with the rest.
+ */
+const AROMATIC_NAMES = new Set([
+  "Garlic",
+  "Ginger",
+  "Scallion",
+  "Lemon Juice",
+  "Soy Sauce",
+  "Miso Paste",
+  "Dijon Mustard",
+  "Hot Sauce / Sriracha",
+  "Balsamic Vinegar",
+  "Rice Vinegar",
+  "Tomato Paste",
+  "Nutritional Yeast",
+  "Cocoa Powder",
+  "Capers",
+  "Erythritol",
+  "Xanthan Gum",
+  "Gelatin",
+  "Lecithin",
+]);
+
+/** True for seasoning and texture agents that should never be rescaled. */
+export function isAromatic(node: IngredientNode): boolean {
+  return AROMATIC_NAMES.has(node.name);
+}
+
 /** 8 modern kitchen tools mapped to their physical/chemical cooking mechanism. */
 export const EQUIPMENT_GRAPH: Record<string, EquipmentNode> = {
   air_fryer: {
