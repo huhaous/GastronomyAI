@@ -33,6 +33,9 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     const status = isUpstreamUnavailable(message) ? 503 : 500;
+    // A 503 is the model being off; a 500 is our bug, and the client only ever
+    // sees the message, so the stack has to land somewhere.
+    if (status === 500) console.error("generate-recipe failed", err);
     return NextResponse.json(
       { error: "Failed to generate recipe", details: message },
       { status }

@@ -734,6 +734,60 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     flavorPairs: ["lemon", "caper", "chili"],
     gramsPer: { piece: 140 },
   },
+  "ground-turkey-breast": {
+    name: "Ground Turkey Breast (99% lean)",
+    aliases: ["ground turkey", "turkey mince", "minced turkey", "lean ground turkey"],
+    macroPer100g: { calories: 111, protein_g: 24.6, carbs_g: 0, fat_g: 1.2 },
+    satietyScore: 8,
+    substitutionFor: ["ground beef", "pork mince"],
+    flavorPairs: ["sage", "smoked paprika", "onion"],
+    gramsPer: {},
+  },
+  "bok-choy": {
+    name: "Bok Choy",
+    aliases: ["pak choi", "baby bok choy", "chinese cabbage"],
+    macroPer100g: { calories: 13, protein_g: 1.5, carbs_g: 2.2, fat_g: 0.2 },
+    satietyScore: 6,
+    substitutionFor: ["noodles (as bulk)", "rice (as bulk)"],
+    flavorPairs: ["ginger", "garlic", "soy sauce", "sesame"],
+    gramsPer: { piece: 75, cup: 70 },
+  },
+  "mixed-greens": {
+    name: "Mixed Greens",
+    aliases: ["salad greens", "mesclun", "leafy greens", "rocket", "arugula", "lettuce"],
+    macroPer100g: { calories: 20, protein_g: 1.8, carbs_g: 2.5, fat_g: 0.3 },
+    satietyScore: 5,
+    substitutionFor: ["pasta (as a base)", "grain bowls"],
+    flavorPairs: ["lemon", "balsamic vinegar", "parmesan"],
+    gramsPer: { cup: 30 },
+  },
+  chickpeas: {
+    name: "Chickpeas (cooked)",
+    aliases: ["garbanzo beans", "cooked chickpeas", "canned chickpeas"],
+    macroPer100g: { calories: 164, protein_g: 8.9, carbs_g: 27.4, fat_g: 2.6 },
+    satietyScore: 8,
+    substitutionFor: ["white rice", "pasta", "croutons"],
+    flavorPairs: ["cumin", "lemon", "tahini", "parsley"],
+    gramsPer: { cup: 164 },
+  },
+  tahini: {
+    name: "Tahini",
+    aliases: ["sesame paste", "tahina"],
+    macroPer100g: { calories: 595, protein_g: 17, carbs_g: 21.2, fat_g: 53.8 },
+    satietyScore: 5,
+    substitutionFor: ["mayonnaise", "cream-based dressings"],
+    flavorPairs: ["lemon", "garlic", "cumin", "chickpeas"],
+    gramsPer: { tsp: 5, tbsp: 15 },
+  },
+  "whole-wheat-bun": {
+    name: "Whole Wheat Burger Bun",
+    aliases: ["burger bun", "whole wheat buns", "wholemeal bun", "hamburger bun"],
+    macroPer100g: { calories: 254, protein_g: 10.2, carbs_g: 45.5, fat_g: 3.6 },
+    satietyScore: 5,
+    substitutionFor: ["white bread", "brioche bun"],
+    flavorPairs: ["sesame seeds", "mustard"],
+    gramsPer: { piece: 70 },
+  },
 };
 
 /**
@@ -945,8 +999,8 @@ export const FAT_LOSS_RULES: Record<NutritionalStrategy, FatLossRule> = {
   },
 };
 
-function normalize(value: string): string {
-  return value
+function normalize(value: string | null | undefined): string {
+  return (value ?? "")
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9\s]/g, " ")
@@ -1008,7 +1062,9 @@ function searchGraph(
  * Fuzzy-match free-text ingredient input (e.g. "Greek yogurt, 0%") against the
  * core graph, then the pantry graph, then the negligible-seasoning list.
  */
-export function findIngredientNode(query: string): MatchedIngredient | undefined {
+export function findIngredientNode(
+  query: string | null | undefined
+): MatchedIngredient | undefined {
   const q = normalize(query);
   if (!q) return undefined;
 
@@ -1036,7 +1092,7 @@ export function findIngredientNode(query: string): MatchedIngredient | undefined
     return {
       key: seasoning.replace(/\s+/g, "-"),
       source: "seasoning",
-      name: query.trim(),
+      name: q,
       macroPer100g: { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 },
       satietyScore: 1,
       substitutionFor: [],

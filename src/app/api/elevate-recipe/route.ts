@@ -33,6 +33,7 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     const status = isUpstreamUnavailable(message) ? 503 : 500;
+    if (status === 500) console.error("elevate-recipe failed", err);
     return NextResponse.json(
       { error: "Failed to elevate recipe", details: message },
       { status }

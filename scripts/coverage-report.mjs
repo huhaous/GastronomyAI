@@ -23,6 +23,7 @@ const REASON_LABEL = {
   no_match: "not in graph",
   unparsed_quantity: "bad quantity",
   unknown_unit: "unknown unit",
+  unnamed: "no name",
 };
 
 const misses = new Map();
@@ -54,9 +55,10 @@ for await (const line of reader) {
   unresolvedLines += record.unresolved?.length ?? 0;
 
   for (const item of record.unresolved ?? []) {
-    const key = `${item.name.trim().toLowerCase()}\u0000${item.reason}`;
+    const name = (item.name ?? "").trim() || "(unnamed line)";
+    const key = `${name.toLowerCase()}\u0000${item.reason}`;
     const entry = misses.get(key) ?? {
-      name: item.name.trim(),
+      name,
       reason: item.reason,
       count: 0,
       samples: new Set(),

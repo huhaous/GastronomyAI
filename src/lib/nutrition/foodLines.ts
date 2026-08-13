@@ -164,7 +164,11 @@ export type LineStatus = "verified" | "negligible" | "unresolved";
  * coverage log actionable: missing nodes are graph work, the other two are
  * parser or prompt work.
  */
-export type UnresolvedReason = "no_match" | "unparsed_quantity" | "unknown_unit";
+export type UnresolvedReason =
+  | "no_match"
+  | "unparsed_quantity"
+  | "unknown_unit"
+  | "unnamed";
 
 /**
  * How the amount was expressed. Count-based lines ("2 eggs", "1 clove") resist
@@ -218,6 +222,12 @@ const COUNT_MEASURES = new Set(["clove", "piece"]);
 
 /** Resolve one food line to grams + macros, or mark it unresolved. */
 export function resolveFoodLine(line: FoodLine): ResolvedLine {
+  // Models occasionally emit a line with no name at all. It cannot be priced or
+  // cooked, but it must not take the whole request down with it.
+  if (!line.name?.trim()) {
+    return { status: "unresolved", reason: "unnamed", grams: 0, macros: EMPTY_MACROS };
+  }
+
   const node = findIngredientNode(line.name);
   if (!node) {
     return { status: "unresolved", reason: "no_match", grams: 0, macros: EMPTY_MACROS };
@@ -303,6 +313,8 @@ export function resolveFoodLines(lines: FoodLine[]): FoodLinesResolution {
 
   for (const line of lines) {
     const resolved = resolveFoodLine(line);
+    // Malformed model output reaches this far; keep it printable downstream.
+    const name = line.name ?? "";
 
     if (resolved.status === "verified") {
       verifiedCount += 1;
@@ -314,7 +326,7 @@ export function resolveFoodLines(lines: FoodLine[]): FoodLinesResolution {
       negligibleCount += 1;
     } else {
       unresolved.push({
-        name: line.name,
+        name,
         quantity: line.quantity,
         unit: line.unit,
         reason: resolved.reason ?? "no_match",
@@ -322,7 +334,7 @@ export function resolveFoodLines(lines: FoodLine[]): FoodLinesResolution {
     }
 
     accounting.push({
-      name: line.name,
+      name,
       status: resolved.status,
       reason: resolved.reason,
       grams: resolved.status === "unresolved" ? undefined : round1(resolved.grams),
