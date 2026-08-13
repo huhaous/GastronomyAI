@@ -3,10 +3,16 @@
 import { useRef, useState } from "react";
 import { FlavorRadar } from "@/components/FlavorRadar";
 import { strategyLabel } from "@/lib/nutritionStrategies";
+import {
+  NUTRITION_DISCLAIMER,
+  NUTRITION_DISCLAIMER_SHORT,
+  PSMF_RECIPE_NOTICE,
+} from "@/lib/safety";
 import type {
   FatLossMetrics,
   GourmetRecipe,
   MacroValidation,
+  PortionAdjustment,
   StrategyValidation,
 } from "@/types/recipe";
 
@@ -82,6 +88,50 @@ function StrategyComplianceNote({
   );
 }
 
+/** Shown when quantities were rewritten to reach the requested target. */
+function PortionAdjustmentNote({
+  adjustment,
+}: {
+  adjustment: PortionAdjustment;
+}) {
+  const changes = adjustment.changes ?? [];
+
+  return (
+    <div className="mt-3 border border-[var(--border)] px-4 py-3">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
+        Portions scaled to your target
+      </p>
+      <p className="mt-1.5 text-xs text-[var(--cream-dim)]">
+        As written the dish came to {adjustment.before_calories} kcal per serving against a{" "}
+        {adjustment.target_calories} kcal target, so quantities were adjusted.
+        {adjustment.bounded &&
+          " Some ingredients hit a sensible limit, so the target is approached rather than matched."}
+      </p>
+      {changes.length > 0 && (
+        <ul className="mt-2 space-y-1 text-xs text-[var(--cream-dim)]">
+          {changes.map((change) => (
+            <li key={change}>— {change}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Attached to PSMF recipes, including printed and forwarded copies. */
+function PsmfNotice() {
+  return (
+    <div className="mt-3 border border-[var(--gold-dim)]/50 px-4 py-3">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--gold)]">
+        Supervised protocol
+      </p>
+      <p className="mt-1.5 text-xs leading-relaxed text-[var(--cream-dim)]">
+        {PSMF_RECIPE_NOTICE}
+      </p>
+    </div>
+  );
+}
+
 function FatLossMetricsStrip({ metrics }: { metrics: FatLossMetrics }) {
   const satietyDisplay = `${metrics.satiety_index.toFixed(1)}/10`;
 
@@ -137,9 +187,10 @@ export function PlatingCard({ recipe, className = "" }: PlatingCardProps) {
   const [copied, setCopied] = useState(false);
 
   async function handleShare() {
-    const caption =
+    const headline =
       recipe.plating.social_caption ??
       `${recipe.name} — ${recipe.macros.calories} kcal · ${recipe.macros.protein_g}g protein`;
+    const caption = `${headline}\n\n${NUTRITION_DISCLAIMER_SHORT}`;
 
     try {
       if (navigator.share) {
@@ -230,6 +281,12 @@ export function PlatingCard({ recipe, className = "" }: PlatingCardProps) {
 
         {metrics && <FatLossMetricsStrip metrics={metrics} />}
 
+        {recipe.nutritional_strategy === "deep_cut_psmf" && <PsmfNotice />}
+
+        {recipe.portion_adjustment && (
+          <PortionAdjustmentNote adjustment={recipe.portion_adjustment} />
+        )}
+
         {recipe.strategy_validation &&
           !recipe.strategy_validation.in_compliance && (
             <StrategyComplianceNote validation={recipe.strategy_validation} />
@@ -276,7 +333,11 @@ export function PlatingCard({ recipe, className = "" }: PlatingCardProps) {
           </ul>
         </section>
 
-        <div className="mt-8 flex flex-wrap gap-3 print:hidden">
+        <p className="mt-8 border-t border-[var(--border)] pt-4 text-[11px] leading-relaxed text-[var(--muted)]">
+          {NUTRITION_DISCLAIMER}
+        </p>
+
+        <div className="mt-6 flex flex-wrap gap-3 print:hidden">
           <button
             type="button"
             onClick={handleShare}

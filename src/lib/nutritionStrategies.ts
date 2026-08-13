@@ -5,6 +5,8 @@ export const NUTRITIONAL_STRATEGY_OPTIONS: {
   label: string;
   blurb: string;
   guidance: string;
+  /** Requires an explicit safety acknowledgement before it can be selected. */
+  restricted?: boolean;
 }[] = [
   {
     id: "post_workout_high_protein",
@@ -23,9 +25,10 @@ export const NUTRITIONAL_STRATEGY_OPTIONS: {
   {
     id: "deep_cut_psmf",
     label: "Deep Cut / PSMF",
-    blurb: "Aggressive deficit, protein-sparing",
+    blurb: "Supervised clinical protocol",
     guidance:
       "Protein-sparing modified fast: very low fat and carbs, maximal lean protein + fibrous volume. Fat-mimicry tech is mandatory so mouthfeel still feels indulgent. Strict calorie ceiling.",
+    restricted: true,
   },
   {
     id: "balanced_deficit",

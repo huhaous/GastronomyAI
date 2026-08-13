@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateGourmetRecipe } from "@/lib/ai/openai";
 import { GenerateRecipeRequestSchema } from "@/lib/ai/schema";
+import { isUpstreamUnavailable } from "@/lib/ai/upstream";
 import type { GenerateRecipeRequest, KitchenTool } from "@/types/recipe";
 
 export const runtime = "nodejs";
@@ -31,12 +32,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ kind: "generate", recipe, model });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    const status =
-      message.includes("OPENAI_API_KEY") ||
-      message.includes("ECONNREFUSED") ||
-      message.includes("fetch failed")
-        ? 503
-        : 500;
+    const status = isUpstreamUnavailable(message) ? 503 : 500;
     return NextResponse.json(
       { error: "Failed to generate recipe", details: message },
       { status }

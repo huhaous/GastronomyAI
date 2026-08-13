@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { NUTRITION_DISCLAIMER } from "@/lib/safety";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,6 +25,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="min-h-full flex flex-col bg-[var(--charcoal)] text-[var(--cream)]">
         {children}
+        <footer className="relative z-10 border-t border-[var(--border)] px-6 py-6 sm:px-10">
+          <p className="mx-auto max-w-5xl text-[11px] leading-relaxed text-[var(--muted)]">
+            {NUTRITION_DISCLAIMER}
+          </p>
+        </footer>
       </body>
     </html>
   );

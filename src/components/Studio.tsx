@@ -13,6 +13,13 @@ import {
   DEFAULT_NUTRITIONAL_STRATEGY,
   NUTRITIONAL_STRATEGY_OPTIONS,
 } from "@/lib/nutritionStrategies";
+import {
+  PSMF_ACKNOWLEDGEMENT,
+  PSMF_EXCLUSIONS,
+  PSMF_RISKS,
+  PSMF_SUMMARY,
+  PSMF_TITLE,
+} from "@/lib/safety";
 import type {
   ElevatedRecipe,
   GourmetRecipe,
@@ -22,6 +29,14 @@ import type {
 } from "@/types/recipe";
 
 type StudioMode = "generate" | "elevate";
+
+/** PSMF is deliberately not offered as one of four equal choices. */
+const EVERYDAY_STRATEGIES = NUTRITIONAL_STRATEGY_OPTIONS.filter(
+  (opt) => !opt.restricted
+);
+const RESTRICTED_STRATEGY = NUTRITIONAL_STRATEGY_OPTIONS.find(
+  (opt) => opt.restricted
+);
 
 type StudioResult =
   | { kind: "generate"; recipe: GourmetRecipe; model?: string }
@@ -83,6 +98,8 @@ export function Studio() {
   const [strategy, setStrategy] = useState<NutritionalStrategy>(
     DEFAULT_NUTRITIONAL_STRATEGY
   );
+  const [psmfAcknowledged, setPsmfAcknowledged] = useState(false);
+  const [psmfPanelOpen, setPsmfPanelOpen] = useState(false);
   const [result, setResult] = useState<StudioResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -131,6 +148,7 @@ export function Studio() {
         time_limit_minutes: Number(timeLimit),
         cuisine_style: cuisine.trim() || undefined,
         nutritional_strategy: strategy,
+        psmf_acknowledged: psmfAcknowledged,
         model: modelId,
       }),
     });
@@ -157,6 +175,7 @@ export function Studio() {
         kitchen_tools: elevateTools,
         time_limit_minutes: Number(elevateTime) || undefined,
         nutritional_strategy: strategy,
+        psmf_acknowledged: psmfAcknowledged,
         model: modelId,
       }),
     });
@@ -228,11 +247,11 @@ export function Studio() {
         <div>
           <FieldLabel>Nutritional Strategy</FieldLabel>
           <div
-            className="grid gap-2 sm:grid-cols-2"
+            className="grid gap-2 sm:grid-cols-3"
             role="radiogroup"
             aria-label="Nutritional strategy"
           >
-            {NUTRITIONAL_STRATEGY_OPTIONS.map((opt) => {
+            {EVERYDAY_STRATEGIES.map((opt) => {
               const active = strategy === opt.id;
               return (
                 <button
@@ -261,6 +280,86 @@ export function Studio() {
               );
             })}
           </div>
+
+          {RESTRICTED_STRATEGY && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (psmfAcknowledged) {
+                    setStrategy(RESTRICTED_STRATEGY.id);
+                    return;
+                  }
+                  setPsmfPanelOpen((open) => !open);
+                }}
+                aria-expanded={psmfAcknowledged ? undefined : psmfPanelOpen}
+                className={`flex w-full items-center justify-between border px-4 py-3 text-left transition ${
+                  strategy === RESTRICTED_STRATEGY.id
+                    ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)]"
+                    : "border-dashed border-[var(--border)] hover:border-[var(--gold-dim)]"
+                }`}
+              >
+                <span>
+                  <span
+                    className={`block text-xs uppercase tracking-[0.14em] ${
+                      strategy === RESTRICTED_STRATEGY.id
+                        ? "text-[var(--gold)]"
+                        : "text-[var(--cream-dim)]"
+                    }`}
+                  >
+                    {RESTRICTED_STRATEGY.label}
+                  </span>
+                  <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                    {psmfAcknowledged
+                      ? RESTRICTED_STRATEGY.blurb
+                      : "Read the safety notes before using this mode"}
+                  </span>
+                </span>
+                <span className="text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                  {psmfAcknowledged ? "Unlocked" : "Restricted"}
+                </span>
+              </button>
+
+              {!psmfAcknowledged && psmfPanelOpen && (
+                <div className="mt-2 border border-[var(--border)] px-4 py-4">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--gold)]">
+                    {PSMF_TITLE}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-[var(--cream-dim)]">
+                    {PSMF_SUMMARY}
+                  </p>
+                  <ul className="mt-3 space-y-1 text-xs text-[var(--cream-dim)]">
+                    {PSMF_RISKS.map((risk) => (
+                      <li key={risk}>— {risk}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--muted)]">
+                    {PSMF_EXCLUSIONS}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPsmfAcknowledged(true);
+                        setPsmfPanelOpen(false);
+                        setStrategy(RESTRICTED_STRATEGY.id);
+                      }}
+                      className="border border-[var(--gold)] px-4 py-2 text-[11px] uppercase tracking-[0.14em] text-[var(--gold)] transition hover:bg-[var(--gold)] hover:text-[var(--charcoal)]"
+                    >
+                      {PSMF_ACKNOWLEDGEMENT}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPsmfPanelOpen(false)}
+                      className="border border-[var(--border)] px-4 py-2 text-[11px] uppercase tracking-[0.14em] text-[var(--cream-dim)] transition hover:border-[var(--gold-dim)]"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
