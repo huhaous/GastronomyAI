@@ -7,12 +7,14 @@
 
 import {
   FAT_LOSS_RULES,
+  batchHostileIngredientNames,
   findEquipmentNode,
   findIngredientNode,
+  specialtyIngredientNames,
   type MatchedEquipment,
   type MatchedIngredient,
 } from "@/data/knowledgeGraph";
-import type { NutritionalStrategy } from "@/types/recipe";
+import type { CookEffort, NutritionalStrategy } from "@/types/recipe";
 
 export interface GraphLookupResult {
   matchedIngredients: MatchedIngredient[];
@@ -54,6 +56,8 @@ export function buildKnowledgeGraphConstraints(params: {
   ingredientNames: string[];
   toolIds: string[];
   strategy?: NutritionalStrategy;
+  allowSpecialty?: boolean;
+  effort?: CookEffort;
 }): GraphConstraintsResult {
   const matchedIngredients: MatchedIngredient[] = [];
   const unmatchedIngredients: string[] = [];
@@ -110,6 +114,24 @@ export function buildKnowledgeGraphConstraints(params: {
         `- Fat: ${rule.fatPercentRange[0]}–${rule.fatPercentRange[1]}% of total calories\n` +
         `- Calorie deficit vs. maintenance: ${rule.calorieDeficitPercentRange[0]}–${rule.calorieDeficitPercentRange[1]}%\n` +
         rule.hardConstraints.map((c) => `- ${c}`).join("\n")
+    );
+  }
+
+  const specialty = specialtyIngredientNames();
+  if (params.allowSpecialty) {
+    sections.push(
+      `### Specialty pantry unlocked\nYou may use these if they earn their place: ${specialty.join(", ")}.`
+    );
+  } else {
+    sections.push(
+      `### Supermarket kitchen — do not use\n${specialty.map((name) => `- ${name}`).join("\n")}\n\nIf the user listed one of these in available ingredients, that single item is allowed. Do not add any other specialty item. Fat-mimicry still required — yogurt, blender, sear, reduction, lemon, mustard.`
+    );
+  }
+
+  if (params.effort === "batch") {
+    const hostile = batchHostileIngredientNames();
+    sections.push(
+      `### Batch kitchen — same-day only, do not box these\n${hostile.map((name) => `- ${name}`).join("\n")}\n\nCook 3–4 portions in one session. Macros are per serving. Pack yogurt/emulsions in a separate tub so they do not weep. Last step must be fridge + how to reheat. Do not write a dressed salad, a browning avocado, delicate white fish, or an assembled sandwich.`
     );
   }
 

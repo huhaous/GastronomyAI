@@ -27,7 +27,7 @@ export const NUTRITIONAL_STRATEGY_OPTIONS: {
     label: "Deep Cut / PSMF",
     blurb: "Supervised clinical protocol",
     guidance:
-      "Protein-sparing modified fast: very low fat and carbs, maximal lean protein + fibrous volume. Fat-mimicry tech is mandatory so mouthfeel still feels indulgent. Strict calorie ceiling.",
+      "Protein-sparing modified fast: very low fat and carbs, maximal lean protein + fibrous volume. Fat-mimicry is mandatory so mouthfeel still feels indulgent — yogurt, blender, volume — not a health-shop gum. Strict calorie ceiling.",
     restricted: true,
   },
   {

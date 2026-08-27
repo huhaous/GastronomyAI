@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { FlavorRadar } from "@/components/FlavorRadar";
+import { potQuantitiesNote } from "@/components/GapFillForks";
 import { strategyLabel } from "@/lib/nutritionStrategies";
 import {
   NUTRITION_DISCLAIMER,
@@ -9,7 +10,10 @@ import {
   PSMF_RECIPE_NOTICE,
 } from "@/lib/safety";
 import type {
+  AppliedGapFill,
+  CookabilityValidation,
   FatLossMetrics,
+  GapSuggestion,
   GourmetRecipe,
   MacroValidation,
   PortionAdjustment,
@@ -63,6 +67,39 @@ function MacroConfidenceBadge({ validation }: { validation: MacroValidation }) {
   );
 }
 
+function CookabilityNote({
+  validation,
+}: {
+  validation: CookabilityValidation;
+}) {
+  if (!validation.violations?.length) return null;
+
+  const title = !validation.supermarket
+    ? "Not a supermarket shop"
+    : !validation.batch
+      ? "Won't hold as leftovers"
+      : !validation.weeknight
+        ? "Harder to cook than a weeknight"
+        : "Harder to cook than asked";
+
+  return (
+    <div className="mt-3 border border-[var(--border)] px-4 py-3">
+      <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
+        {title}
+      </p>
+      <p className="mt-1.5 text-xs text-[var(--cream-dim)]">
+        Macros and the mimicry still stand. The shopping list or the method is
+        what would make a tired client skip it.
+      </p>
+      <ul className="mt-2 space-y-1 text-xs text-[var(--cream-dim)]">
+        {validation.violations.map((v) => (
+          <li key={v}>— {v}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Surfaced only when the verified macros fall outside the strategy's ranges. */
 function StrategyComplianceNote({
   validation,
@@ -91,35 +128,72 @@ function StrategyComplianceNote({
 /** Shown when quantities were rewritten to reach the requested target. */
 function PortionAdjustmentNote({
   adjustment,
+  suggestions,
+  applied,
+  recipe,
 }: {
   adjustment: PortionAdjustment;
+  suggestions?: GapSuggestion[];
+  applied?: AppliedGapFill;
+  recipe: GourmetRecipe;
 }) {
   const changes = adjustment.changes ?? [];
   const gap = adjustment.after_calories - adjustment.target_calories;
-  // A gap this size changes what the plate is for, so it gets its own sentence
-  // with the number in it rather than a reassuring aside about limits.
   const missed =
     adjustment.target_calories > 0 &&
     Math.abs(gap) / adjustment.target_calories > 0.1;
+  const fills = suggestions ?? [];
 
   return (
     <div className="mt-3 border border-[var(--border)] px-4 py-3">
       <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
         Portions scaled to your target
       </p>
-      <p className="mt-1.5 text-xs text-[var(--cream-dim)]">
-        As written the dish came to {adjustment.before_calories} kcal per serving against a{" "}
-        {adjustment.target_calories} kcal target, so quantities were adjusted.
-        {adjustment.bounded && !missed &&
-          " Some ingredients hit a sensible limit, so the target is approached rather than matched."}
-      </p>
-      {missed && (
-        <p className="mt-1.5 text-xs text-[var(--gold)]">
-          It still lands at {adjustment.after_calories} kcal,{" "}
-          {Math.abs(Math.round((gap / adjustment.target_calories) * 100))}%{" "}
-          {gap < 0 ? "under" : "over"} target. These ingredients cannot reach it
-          without portions that stop resembling a plate — add an energy-dense
-          ingredient, or treat this as the meal it is.
+        <p className="mt-1.5 text-xs text-[var(--cream-dim)]">
+          As written the dish came to {adjustment.before_calories} kcal per serving against a{" "}
+          {adjustment.target_calories} kcal target, so quantities were adjusted.
+          {adjustment.bounded && !missed &&
+            " Some ingredients hit a sensible limit, so the target is approached rather than matched."}
+          {recipe.servings > 1 ? ` ${potQuantitiesNote(recipe.servings)}` : ""}
+        </p>
+        {applied && (
+          <p className="mt-2 text-xs text-[var(--cream)]">
+            {applied.kind === "swap"
+              ? `The list and method use ${applied.ingredient} instead of ${applied.replaces}. `
+              : `The list and method include ${applied.grams_in_recipe}g ${applied.ingredient}. `}
+            {recipe.method_alternate
+              ? "The version before the swap is under the steps."
+              : ""}
+          </p>
+        )}
+      {missed && fills.length > 0 && !applied && (
+        <div className="mt-3">
+          <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--muted)]">
+            Other ways to hit the target
+          </p>
+          <ul className="mt-2 space-y-2 text-xs text-[var(--cream-dim)]">
+            {fills.map((fill) => (
+              <li key={`${fill.kind}-${fill.ingredient}`}>
+                <span className="text-[var(--cream)]">
+                  {fill.kind === "swap"
+                    ? `Swap ${fill.replaces} for ${fill.grams}g ${fill.ingredient}`
+                    : `Add ${fill.grams}g ${fill.ingredient}`}
+                </span>
+                {` → ${fill.resulting_calories} kcal`}
+                {fill.closes_gap ? "" : " (closer, not exact)"}
+                <span className="mt-0.5 block text-[var(--muted)]">
+                  {fill.flavor_note}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {missed && fills.length === 0 && !applied && (
+        <p className="mt-1.5 text-xs text-[var(--muted)]">
+          Nothing in the graph can close this gap without breaking the strategy
+          or the flavor. Treat this as the meal it is, or add an energy-dense
+          ingredient that belongs with it.
         </p>
       )}
       {changes.length > 0 && (
@@ -292,6 +366,12 @@ export function PlatingCard({ recipe, className = "" }: PlatingCardProps) {
             </dt>
             <dd className="mt-0.5 text-[var(--cream)]">{macros.fat_g}g</dd>
           </div>
+          <div>
+            <dt className="text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+              Servings
+            </dt>
+            <dd className="mt-0.5 text-[var(--cream)]">{recipe.servings}</dd>
+          </div>
         </dl>
 
         {metrics && <FatLossMetricsStrip metrics={metrics} />}
@@ -299,13 +379,22 @@ export function PlatingCard({ recipe, className = "" }: PlatingCardProps) {
         {recipe.nutritional_strategy === "deep_cut_psmf" && <PsmfNotice />}
 
         {recipe.portion_adjustment && (
-          <PortionAdjustmentNote adjustment={recipe.portion_adjustment} />
+          <PortionAdjustmentNote
+            adjustment={recipe.portion_adjustment}
+            suggestions={recipe.gap_suggestions}
+            applied={recipe.gap_fill_applied}
+            recipe={recipe}
+          />
         )}
 
         {recipe.strategy_validation &&
           !recipe.strategy_validation.in_compliance && (
             <StrategyComplianceNote validation={recipe.strategy_validation} />
           )}
+
+        {recipe.cookability && recipe.cookability.violations.length > 0 && (
+          <CookabilityNote validation={recipe.cookability} />
+        )}
 
         <div className="mt-6">
           <FlavorRadar

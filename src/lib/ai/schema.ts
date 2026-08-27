@@ -66,6 +66,8 @@ export const GenerateRecipeRequestSchema = z
     time_limit_minutes: z.number().positive().max(240),
     nutritional_strategy: NutritionalStrategySchema.optional(),
     psmf_acknowledged: z.boolean().optional(),
+    allow_specialty: z.boolean().optional(),
+    effort: z.enum(["weeknight", "batch", "project"]).optional(),
     cuisine_style: z.string().optional(),
     dietary_restrictions: z.array(z.string()).optional(),
     model: LocalModelSchema.optional(),
@@ -81,6 +83,8 @@ export const ElevateRecipeRequestSchema = z
     time_limit_minutes: z.number().positive().max(240).optional(),
     nutritional_strategy: NutritionalStrategySchema.optional(),
     psmf_acknowledged: z.boolean().optional(),
+    allow_specialty: z.boolean().optional(),
+    effort: z.enum(["weeknight", "batch", "project"]).optional(),
     dietary_restrictions: z.array(z.string()).optional(),
     model: LocalModelSchema.optional(),
   })

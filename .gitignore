@@ -16,6 +16,12 @@
 # runtime data (graph coverage log)
 /var
 
+# last generated plate (agent-readable; overwritten every Elevate)
+/last-recipe.json
+/last-recipe.md
+/last-recipe[0-9].json
+/last-recipe[0-9].md
+
 # next.js
 /.next/
 /out/

@@ -10,10 +10,18 @@ import {
 import { NUTRITIONAL_STRATEGY_OPTIONS } from "@/lib/nutritionStrategies";
 import { buildKnowledgeGraphConstraints } from "@/lib/ai/graphContext";
 import { applyGraphRecalculation } from "@/lib/ai/nutritionRecalc";
-import { adjustPortions } from "@/lib/ai/portionAdjust";
+import { adjustPortions, rebalanceProteinForStrategy } from "@/lib/ai/portionAdjust";
+import { announcePlateAdditions } from "@/lib/ai/elevationNotes";
+import { dumpLastRecipe } from "@/lib/ai/recipeDump";
 import { validateAgainstStrategy } from "@/lib/ai/strategyValidation";
+import { suggestGapFillers, applyGapFill, cookDisplayName } from "@/lib/nutrition/gapFill";
+import { repairPieceQuantities } from "@/lib/nutrition/foodLines";
+import { validateCookability } from "@/lib/cookability";
+import { ensureCarbonaraEmulsion } from "@/lib/cook/carbonaraEmulsion";
+import { repairCookMethod } from "@/lib/cook/methodIntegrity";
 import { recordCoverage } from "@/lib/telemetry/coverageLog";
 import type {
+  CookEffort,
   ElevateRecipeRequest,
   ElevatedRecipe,
   GenerateRecipeRequest,
@@ -50,6 +58,8 @@ function buildSystemMessages(params: {
   ingredientNames: string[];
   toolIds: string[];
   strategy?: GenerateRecipeRequest["nutritional_strategy"];
+  allowSpecialty?: boolean;
+  effort?: CookEffort;
 }): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: GASTRONOMY_SYSTEM_PROMPT },
@@ -73,44 +83,159 @@ function buildSystemMessages(params: {
  * the rewritten quantities so the reported macros describe the served plate.
  */
 function finalizeRecipe<T extends GourmetRecipe>(
-  raw: T,
+  incoming: T,
   context: {
     mode: "generate" | "elevate";
     model: string;
     strategy?: NutritionalStrategy;
     target?: Partial<MacroProfile>;
+    pantry?: string[];
+    allowSpecialty?: boolean;
+    effort?: CookEffort;
+    timeLimitMinutes?: number;
+    craving?: string;
   }
 ): T {
+  const cravingEarly =
+    context.craving ??
+    ("original_craving" in incoming
+      ? String((incoming as { original_craving?: string }).original_craving ?? "")
+      : "");
+  const raw = ensureCarbonaraEmulsion(repairPieceQuantities(incoming), {
+    craving: cravingEarly || undefined,
+    targetCalories: context.target?.calories,
+  });
   const firstPass = applyGraphRecalculation(raw);
   const { recipe: scaled, adjustment } = adjustPortions(
     firstPass.recipe,
-    context.target
+    context.target,
+    { strategy: context.strategy ?? firstPass.recipe.nutritional_strategy }
   );
 
   const { recipe: verified, result } = adjustment
     ? applyGraphRecalculation(scaled)
     : firstPass;
   const effectiveStrategy = context.strategy ?? verified.nutritional_strategy;
+  const craving =
+    context.craving ??
+    ("original_craving" in verified
+      ? String((verified as { original_craving?: string }).original_craving ?? "")
+      : "");
+
+  let working = verified;
+  let coverageResult = result;
+
+  const takeSuggestions = () =>
+    coverageResult.validation.confidence === "verified" && context.target
+      ? suggestGapFillers({
+          lines: working.ingredients,
+          macros: working.macros,
+          servings: working.servings,
+          target: context.target,
+          strategy: effectiveStrategy,
+          pantry: context.pantry,
+          allowSpecialty: context.allowSpecialty,
+          effort: context.effort,
+          craving: craving || undefined,
+          dish: working.name,
+        })
+      : [];
+
+  let gapSuggestions = takeSuggestions();
+  const chosen = gapSuggestions[0];
+  const targetKcal = context.target?.calories;
+  const miss =
+    targetKcal && targetKcal > 0
+      ? Math.abs(working.macros.calories - targetKcal) / targetKcal
+      : 0;
+
+  if (chosen && miss > 0.1) {
+    const { recipe: filled, gramsInRecipe } = applyGapFill(working, chosen);
+    const again = applyGraphRecalculation(filled);
+    working = again.recipe;
+    coverageResult = again.result;
+    const servings = Math.max(1, working.servings || 1);
+    const cookLabel = cookDisplayName(chosen.ingredient);
+    const verb =
+      chosen.kind === "swap"
+        ? `This plate uses ${gramsInRecipe}g ${cookLabel} instead of ${chosen.replaces}`
+        : `This plate includes ${gramsInRecipe}g ${cookLabel}`;
+    const replacedKey = chosen.replaces
+      ? chosen.replaces.split(/[^A-Za-z]+/)[0]?.toLowerCase()
+      : undefined;
+    const priorChanges = (working.portion_adjustment?.changes ?? []).filter(
+      (change) =>
+        !replacedKey || !change.toLowerCase().includes(replacedKey)
+    );
+    working = {
+      ...working,
+      gap_fill_applied: {
+        ...chosen,
+        ingredient: cookLabel,
+        grams_in_recipe: gramsInRecipe,
+        servings,
+      },
+      portion_adjustment: working.portion_adjustment
+        ? {
+            ...working.portion_adjustment,
+            after_calories: working.macros.calories,
+            changes: [...priorChanges, verb],
+          }
+        : working.portion_adjustment,
+    };
+    gapSuggestions = takeSuggestions().filter(
+      (row) =>
+        row.ingredient !== chosen.ingredient || row.kind !== chosen.kind
+    );
+  }
+
+  const rebalanced = rebalanceProteinForStrategy(
+    working,
+    context.target,
+    effectiveStrategy
+  );
+  if (rebalanced !== working) {
+    const priced = applyGraphRecalculation(rebalanced);
+    working = priced.recipe;
+    coverageResult = priced.result;
+  }
+
+  working = repairCookMethod(working, { effort: context.effort });
+  working = announcePlateAdditions(working);
+
+  const cookability = validateCookability(working, {
+    allowSpecialty: context.allowSpecialty,
+    effort: context.effort,
+    pantry: context.pantry,
+    timeLimitMinutes: context.timeLimitMinutes,
+  });
 
   recordCoverage({
     ts: new Date().toISOString(),
     mode: context.mode,
     model: context.model,
     strategy: effectiveStrategy,
-    dish: verified.name,
-    confidence: result.validation.confidence,
-    resolved_ingredients: result.validation.resolved_ingredients,
-    total_ingredients: result.validation.total_ingredients,
-    verified_kcal: result.validation.verified_kcal,
-    reported_kcal: verified.macros.calories,
-    unresolved: result.unresolved,
+    dish: working.name,
+    confidence: coverageResult.validation.confidence,
+    resolved_ingredients: coverageResult.validation.resolved_ingredients,
+    total_ingredients: coverageResult.validation.total_ingredients,
+    verified_kcal: coverageResult.validation.verified_kcal,
+    reported_kcal: working.macros.calories,
+    unresolved: coverageResult.unresolved,
   });
 
-  return {
-    ...verified,
+  const finalized = {
+    ...working,
     nutritional_strategy: effectiveStrategy,
-    strategy_validation: validateAgainstStrategy(verified.macros, effectiveStrategy),
+    strategy_validation: validateAgainstStrategy(working.macros, effectiveStrategy),
+    gap_suggestions: gapSuggestions.length > 0 ? gapSuggestions : undefined,
+    cookability: cookability.violations.length > 0 ? cookability : undefined,
   };
+  dumpLastRecipe(finalized, {
+    mode: context.mode,
+    craving: craving || undefined,
+  });
+  return finalized;
 }
 
 /**
@@ -170,12 +295,16 @@ export async function generateGourmetRecipe(
     strategy_guidance: strategyGuidance(request.nutritional_strategy),
     cuisine_style: request.cuisine_style,
     dietary_restrictions: request.dietary_restrictions,
+    allow_specialty: request.allow_specialty,
+    effort: request.effort,
   });
 
   const systemMessages = buildSystemMessages({
     ingredientNames: request.available_ingredients,
     toolIds: request.kitchen_tools,
     strategy: request.nutritional_strategy,
+    allowSpecialty: request.allow_specialty,
+    effort: request.effort,
   });
 
   const completion = await client.chat.completions.create({
@@ -193,6 +322,10 @@ export async function generateGourmetRecipe(
     model,
     strategy: request.nutritional_strategy,
     target: request.target_macros,
+    pantry: request.available_ingredients,
+    allowSpecialty: request.allow_specialty,
+    effort: request.effort,
+    timeLimitMinutes: request.time_limit_minutes,
   });
 
   return { recipe, model };
@@ -213,12 +346,16 @@ export async function elevateCravingRecipe(
     nutritional_strategy: request.nutritional_strategy,
     strategy_guidance: strategyGuidance(request.nutritional_strategy),
     dietary_restrictions: request.dietary_restrictions,
+    allow_specialty: request.allow_specialty,
+    effort: request.effort,
   });
 
   const systemMessages = buildSystemMessages({
     ingredientNames: [],
     toolIds: request.kitchen_tools ?? [],
     strategy: request.nutritional_strategy,
+    allowSpecialty: request.allow_specialty,
+    effort: request.effort,
   });
 
   const completion = await client.chat.completions.create({
@@ -237,6 +374,10 @@ export async function elevateCravingRecipe(
       model,
       strategy: request.nutritional_strategy,
       target: request.target_macros,
+      allowSpecialty: request.allow_specialty,
+      effort: request.effort,
+      timeLimitMinutes: request.time_limit_minutes,
+      craving: request.craving_meal,
     })
   );
 

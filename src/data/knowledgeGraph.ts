@@ -32,8 +32,10 @@ export interface HouseholdMeasures {
 }
 
 export interface IngredientNode {
-  /** Canonical display name. */
+  /** Canonical name — may include a nutrition qualifier such as "(dry)". */
   name: string;
+  /** Name a cook reads on a card. Falls back to `name` when omitted. */
+  cookName?: string;
   /** Alternate names/spellings for fuzzy matching against free-text input. */
   aliases?: string[];
   /** Verified macros per 100g, RAW / as-purchased weight. */
@@ -52,6 +54,59 @@ export interface IngredientNode {
    * verification the way a genuinely unknown ingredient does.
    */
   negligible?: boolean;
+  /**
+   * Where a tired client can actually get this. Omitted means supermarket.
+   * Specialty items (xanthan, konjac, lecithin) are the trip that makes people
+   * abandon the recipe — they stay in the graph for opt-in and for pricing,
+   * but default generation must not reach for them.
+   */
+  availability?: "supermarket" | "specialty";
+  /**
+   * How the ingredient behaves after a night in the fridge. Omitted means it
+   * holds for a 3–4 day batch. `same_day` is a dressed salad, a browning avocado,
+   * delicate fish, a bun that sogs — fine tonight, dead as leftovers.
+   */
+  storage?: "same_day";
+  /**
+   * How this ingredient must be handled in the method. Macros can be right
+   * while the cook still produces an inedible plate.
+   */
+  handling?: {
+    /** Raw in a cold yogurt/cottage-cheese emulsion is harsh; bloom in heat first. */
+    bloomBeforeColdDairy?: boolean;
+    /**
+     * Acidic dairy emulsions split on a live flame. Once this is in the pan,
+     * later steps may only use residual heat.
+     */
+    breakOnDirectHeat?: boolean;
+    /**
+     * How a listed ingredient must show up in the method. The model often
+     * prices a food on the list and then never cooks it.
+     */
+    methodRole?: "combine_after_sear" | "finish";
+    /**
+     * Visual / volumetric additions that must be named on the Elevation card
+     * even when they are not a fat-mimicry swap.
+     */
+    elevationRole?: "volume" | "aroma";
+    /**
+     * Spiralized / ribboned as a pasta stand-in. Never noun-swap this into
+     * wheat pasta — the methods are different foods.
+     */
+    volumeNoodle?: boolean;
+    /** How a dry starch must be cooked when it is the plate's primary carb. */
+    starchCook?: "boil_reserve_toss" | "simmer" | "toast_assemble";
+    /**
+     * The model writes "1" bun as "1g". Treat small integers as piece counts,
+     * not grams — chicken breasts are weighed, buns are counted.
+     */
+    countAsPiece?: boolean;
+    /**
+     * Lecithin / protein-set agent for a carbonara-style emulsion. Blended
+     * into yogurt off the heat; never scrambled on a live flame.
+     */
+    emulsionRole?: "lecithin";
+  };
 }
 
 export interface EquipmentNode {
@@ -110,6 +165,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["red meat", "pork", "fatty deli meats"],
     flavorPairs: ["lemon", "thyme", "garlic", "smoked paprika"],
     gramsPer: { piece: 174 },
+    handling: { methodRole: "combine_after_sear" },
   },
   salmon: {
     name: "Salmon",
@@ -119,6 +175,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["fatty red meat", "cream-based fish dishes"],
     flavorPairs: ["dill", "lemon", "capers", "miso"],
     gramsPer: { piece: 150 },
+    handling: { methodRole: "combine_after_sear" },
   },
   shrimp: {
     name: "Shrimp",
@@ -128,6 +185,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["scallops", "lobster", "fatty proteins"],
     flavorPairs: ["garlic", "chili", "lime", "cilantro"],
     gramsPer: { piece: 15 },
+    handling: { methodRole: "combine_after_sear" },
   },
   "egg-whites": {
     name: "Egg Whites",
@@ -137,6 +195,22 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["whole eggs", "mayonnaise binder"],
     flavorPairs: ["chives", "smoked paprika", "nutritional yeast"],
     gramsPer: { piece: 33, tbsp: 15, cup: 243 },
+    handling: { emulsionRole: "lecithin", breakOnDirectHeat: true },
+  },
+  "egg-yolk": {
+    name: "Egg Yolk",
+    cookName: "Egg yolk",
+    aliases: ["egg yolks", "yolk"],
+    macroPer100g: { calories: 322, protein_g: 15.9, carbs_g: 3.6, fat_g: 26.5 },
+    satietyScore: 6,
+    substitutionFor: ["cream (emulsifier)"],
+    flavorPairs: ["black pepper", "pecorino", "parmesan"],
+    gramsPer: { piece: 17 },
+    handling: {
+      emulsionRole: "lecithin",
+      breakOnDirectHeat: true,
+      countAsPiece: true,
+    },
   },
   "whole-egg": {
     name: "Whole Egg",
@@ -146,6 +220,11 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["cream (custard base)", "mayonnaise"],
     flavorPairs: ["black pepper", "chives", "parmesan"],
     gramsPer: { piece: 50 },
+    handling: {
+      emulsionRole: "lecithin",
+      breakOnDirectHeat: true,
+      countAsPiece: true,
+    },
   },
   "greek-yogurt": {
     name: "Greek Yogurt (0% fat)",
@@ -155,6 +234,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["heavy cream", "sour cream", "mayonnaise", "butter"],
     flavorPairs: ["lemon", "cucumber", "dill", "honey"],
     gramsPer: { tbsp: 15, cup: 245 },
+    handling: { breakOnDirectHeat: true },
   },
   "cottage-cheese": {
     name: "Cottage Cheese (low-fat)",
@@ -164,6 +244,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["ricotta", "cream cheese"],
     flavorPairs: ["berries", "black pepper", "chives"],
     gramsPer: { tbsp: 15, cup: 226 },
+    handling: { breakOnDirectHeat: true },
   },
   tofu: {
     name: "Tofu (firm)",
@@ -198,9 +279,21 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     aliases: ["courgette", "zucchinis"],
     macroPer100g: { calories: 17, protein_g: 1.2, carbs_g: 3.1, fat_g: 0.3 },
     satietyScore: 7,
-    substitutionFor: ["pasta noodles", "lasagna sheets"],
+    substitutionFor: ["pasta noodles", "lasagna sheets", "burger bun"],
     flavorPairs: ["basil", "garlic", "lemon", "parmesan"],
     gramsPer: { cup: 124, piece: 200 },
+    handling: { volumeNoodle: true },
+  },
+  "spaghetti-squash": {
+    name: "Spaghetti Squash",
+    cookName: "Spaghetti squash",
+    aliases: ["spaghetti squash strands", "roasted spaghetti squash"],
+    macroPer100g: { calories: 31, protein_g: 0.6, carbs_g: 7, fat_g: 0.3 },
+    satietyScore: 6,
+    substitutionFor: ["pasta noodles"],
+    flavorPairs: ["garlic", "parmesan", "basil", "lemon"],
+    gramsPer: { cup: 155 },
+    handling: { volumeNoodle: true },
   },
   broccoli: {
     name: "Broccoli",
@@ -219,6 +312,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["pasta filling bulk", "cheese-heavy fillings"],
     flavorPairs: ["nutmeg", "garlic", "lemon", "feta"],
     gramsPer: { cup: 30 },
+    handling: { elevationRole: "volume" },
   },
   mushrooms: {
     name: "Mushrooms (white button)",
@@ -237,6 +331,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["chips (crunch)", "bread (sandwich base)"],
     flavorPairs: ["dill", "mint", "yogurt", "lemon"],
     gramsPer: { cup: 133, piece: 300 },
+    storage: "same_day",
   },
   "konjac-noodles": {
     name: "Konjac / Shirataki Noodles",
@@ -247,6 +342,8 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     flavorPairs: ["sesame oil", "soy sauce", "chili", "scallion"],
     /** `piece` = one standard 200g drained packet. */
     gramsPer: { piece: 200 },
+    availability: "specialty",
+    handling: { volumeNoodle: true },
   },
   "lemon-juice": {
     name: "Lemon Juice",
@@ -269,6 +366,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
   },
   oats: {
     name: "Oats (rolled, dry)",
+    cookName: "Rolled oats",
     aliases: ["rolled oats", "oatmeal", "oat"],
     macroPer100g: { calories: 389, protein_g: 16.9, carbs_g: 66.3, fat_g: 6.9 },
     satietyScore: 8,
@@ -284,6 +382,7 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["butter", "mayonnaise", "cheese (creaminess)"],
     flavorPairs: ["lime", "cilantro", "chili", "tomato"],
     gramsPer: { piece: 150, cup: 150 },
+    storage: "same_day",
   },
 };
 
@@ -328,6 +427,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["basil", "lemon", "black pepper"],
     gramsPer: { tsp: 2, tbsp: 5, cup: 100 },
+    handling: { methodRole: "finish" },
   },
   feta: {
     name: "Feta",
@@ -337,6 +437,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["cucumber", "mint", "lemon"],
     gramsPer: { tbsp: 15, cup: 150 },
+    handling: { methodRole: "finish" },
   },
   mozzarella: {
     name: "Mozzarella (part-skim)",
@@ -346,6 +447,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["basil", "tomato", "oregano"],
     gramsPer: { cup: 112 },
+    handling: { methodRole: "finish" },
   },
   cheddar: {
     name: "Cheddar",
@@ -355,6 +457,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["chili", "chive", "mustard"],
     gramsPer: { tbsp: 7, cup: 113 },
+    handling: { methodRole: "finish" },
   },
   "cream-cheese": {
     name: "Cream Cheese",
@@ -367,39 +470,47 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
   },
   "white-rice": {
     name: "White Rice (dry)",
+    cookName: "White rice",
     aliases: ["rice", "jasmine rice", "basmati rice"],
     macroPer100g: { calories: 365, protein_g: 7.1, carbs_g: 80, fat_g: 0.7 },
     satietyScore: 5,
     substitutionFor: [],
     flavorPairs: ["sesame", "scallion", "soy sauce"],
     gramsPer: { cup: 185 },
+    handling: { starchCook: "simmer" },
   },
   "brown-rice": {
     name: "Brown Rice (dry)",
+    cookName: "Brown rice",
     aliases: ["wholegrain rice"],
     macroPer100g: { calories: 370, protein_g: 7.9, carbs_g: 77.2, fat_g: 2.9 },
     satietyScore: 6,
     substitutionFor: ["white rice"],
     flavorPairs: ["sesame", "ginger", "mushroom"],
     gramsPer: { cup: 190 },
+    handling: { starchCook: "simmer" },
   },
   pasta: {
     name: "Pasta (dry)",
-    aliases: ["spaghetti", "penne", "noodles", "wheat pasta"],
+    cookName: "Pasta",
+    aliases: ["spaghetti", "penne", "fettuccine", "linguine", "noodles", "wheat pasta"],
     macroPer100g: { calories: 371, protein_g: 13, carbs_g: 74.7, fat_g: 1.5 },
     satietyScore: 5,
     substitutionFor: [],
     flavorPairs: ["basil", "garlic", "parmesan"],
     gramsPer: { cup: 100 },
+    handling: { starchCook: "boil_reserve_toss" },
   },
   quinoa: {
     name: "Quinoa (dry)",
+    cookName: "Quinoa",
     aliases: [],
     macroPer100g: { calories: 368, protein_g: 14.1, carbs_g: 64.2, fat_g: 6.1 },
     satietyScore: 7,
     substitutionFor: ["white rice"],
     flavorPairs: ["lemon", "herbs", "cumin"],
     gramsPer: { cup: 170 },
+    handling: { starchCook: "simmer" },
   },
   panko: {
     name: "Panko Breadcrumbs",
@@ -418,6 +529,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["wheat flour"],
     flavorPairs: ["vanilla", "cinnamon", "cocoa"],
     gramsPer: { tbsp: 8, cup: 96 },
+    availability: "specialty",
   },
   potato: {
     name: "Potato",
@@ -454,6 +566,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["thyme", "garlic", "vinegar"],
     gramsPer: { piece: 110, cup: 160 },
+    handling: { bloomBeforeColdDairy: true },
   },
   garlic: {
     name: "Garlic",
@@ -463,6 +576,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["lemon", "thyme", "chili"],
     gramsPer: { clove: 3, tsp: 2.8, tbsp: 8.4 },
+    handling: { bloomBeforeColdDairy: true },
   },
   ginger: {
     name: "Ginger",
@@ -508,6 +622,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: [],
     flavorPairs: ["lemon", "garlic", "chili"],
     gramsPer: { cup: 21 },
+    handling: { elevationRole: "volume" },
   },
   carrot: {
     name: "Carrot",
@@ -556,7 +671,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
   },
   mustard: {
     name: "Dijon Mustard",
-    aliases: ["dijon", "wholegrain mustard"],
+    aliases: ["dijon", "mustard", "dijon mustard", "wholegrain mustard", "yellow mustard"],
     macroPer100g: { calories: 66, protein_g: 3.7, carbs_g: 5.8, fat_g: 3.3 },
     satietyScore: 2,
     substitutionFor: [],
@@ -601,6 +716,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
   },
   "nutritional-yeast": {
     name: "Nutritional Yeast",
+    availability: "specialty",
     aliases: ["nooch"],
     macroPer100g: { calories: 385, protein_g: 50, carbs_g: 36, fat_g: 5 },
     satietyScore: 4,
@@ -652,6 +768,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["sugar"],
     flavorPairs: ["vanilla", "cinnamon", "cocoa"],
     gramsPer: { tsp: 4, tbsp: 12 },
+    availability: "specialty",
   },
   "xanthan-gum": {
     name: "Xanthan Gum",
@@ -661,6 +778,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["heavy cream (as thickener)"],
     flavorPairs: [],
     gramsPer: { tsp: 2.5, tbsp: 7.5 },
+    availability: "specialty",
   },
   gelatin: {
     name: "Gelatin",
@@ -670,6 +788,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["fat (as texture agent)"],
     flavorPairs: [],
     gramsPer: { tsp: 3, tbsp: 9 },
+    availability: "specialty",
   },
   berries: {
     name: "Mixed Berries",
@@ -688,6 +807,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["pork belly"],
     flavorPairs: ["paprika", "garlic", "lemon"],
     gramsPer: { piece: 90 },
+    handling: { methodRole: "combine_after_sear" },
   },
   "turkey-bacon": {
     name: "Turkey Bacon",
@@ -706,6 +826,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["egg yolk (as emulsifier)"],
     flavorPairs: [],
     gramsPer: { tsp: 2.5, tbsp: 7.5 },
+    availability: "specialty",
   },
   "lean-beef": {
     name: "Lean Beef (93/7)",
@@ -724,6 +845,7 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     substitutionFor: ["fried fish"],
     flavorPairs: ["lemon", "dill", "capers"],
     gramsPer: { piece: 150 },
+    storage: "same_day",
   },
   tuna: {
     name: "Tuna (canned in water)",
@@ -754,12 +876,23 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
   },
   "mixed-greens": {
     name: "Mixed Greens",
-    aliases: ["salad greens", "mesclun", "leafy greens", "rocket", "arugula", "lettuce"],
+    aliases: [
+      "salad greens",
+      "mesclun",
+      "leafy greens",
+      "rocket",
+      "arugula",
+      "lettuce",
+      "lettuce leaves",
+      "lettuce leaf",
+    ],
     macroPer100g: { calories: 20, protein_g: 1.8, carbs_g: 2.5, fat_g: 0.3 },
     satietyScore: 5,
     substitutionFor: ["pasta (as a base)", "grain bowls"],
     flavorPairs: ["lemon", "balsamic vinegar", "parmesan"],
-    gramsPer: { cup: 30 },
+    gramsPer: { cup: 30, piece: 15 },
+    storage: "same_day",
+    handling: { elevationRole: "volume", countAsPiece: true },
   },
   chickpeas: {
     name: "Chickpeas (cooked)",
@@ -781,12 +914,23 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
   },
   "whole-wheat-bun": {
     name: "Whole Wheat Burger Bun",
-    aliases: ["burger bun", "whole wheat buns", "wholemeal bun", "hamburger bun"],
+    aliases: [
+      "burger bun",
+      "whole wheat buns",
+      "wholemeal bun",
+      "hamburger bun",
+      "whole grain bun",
+      "whole grain burger bun",
+      "whole grain burger buns",
+      "sesame bun",
+    ],
     macroPer100g: { calories: 254, protein_g: 10.2, carbs_g: 45.5, fat_g: 3.6 },
     satietyScore: 5,
     substitutionFor: ["white bread", "brioche bun"],
     flavorPairs: ["sesame seeds", "mustard"],
     gramsPer: { piece: 70 },
+    storage: "same_day",
+    handling: { starchCook: "toast_assemble", countAsPiece: true },
   },
 };
 
@@ -850,6 +994,30 @@ const AROMATIC_NAMES = new Set([
 /** True for seasoning and texture agents that should never be rescaled. */
 export function isAromatic(node: IngredientNode): boolean {
   return AROMATIC_NAMES.has(node.name);
+}
+
+/** True when buying this is a special trip for a typical supermarket cook. */
+export function isSpecialty(node: IngredientNode): boolean {
+  return node.availability === "specialty";
+}
+
+/** Display names the default kitchen is not allowed to reach for. */
+export function specialtyIngredientNames(): string[] {
+  return [...Object.values(INGREDIENT_GRAPH), ...Object.values(PANTRY_GRAPH)]
+    .filter(isSpecialty)
+    .map((node) => node.name);
+}
+
+/** True when this dies in the fridge — allowed tonight, not as a 3–4 day batch. */
+export function isBatchHostile(node: IngredientNode): boolean {
+  return node.storage === "same_day";
+}
+
+/** Display names a batch cook should not put in the box. */
+export function batchHostileIngredientNames(): string[] {
+  return [...Object.values(INGREDIENT_GRAPH), ...Object.values(PANTRY_GRAPH)]
+    .filter(isBatchHostile)
+    .map((node) => node.name);
 }
 
 /** 8 modern kitchen tools mapped to their physical/chemical cooking mechanism. */
@@ -1019,8 +1187,58 @@ function phraseMatch(text: string, phrase: string): boolean {
   return new RegExp(`(^|\\s)${escaped}(es|s)?($|\\s)`).test(text);
 }
 
+/** Modifiers that do not change which food a line is. */
+const MATCH_QUALIFIERS = new Set([
+  "dry",
+  "fresh",
+  "raw",
+  "cooked",
+  "whole",
+  "wheat",
+  "grain",
+  "skinless",
+  "boneless",
+  "dijon",
+  "plain",
+  "nonfat",
+  "low",
+  "fat",
+  "lean",
+  "minced",
+  "chopped",
+  "sliced",
+  "leaves",
+  "leaf",
+  "breast",
+  "breasts",
+  "clove",
+  "cloves",
+]);
+
+/**
+ * "spaghetti" must not claim "spaghetti squash". Extra content words in the
+ * longer string mean a different food, not a qualifier.
+ */
+function leftoverContent(longer: string, shorter: string): string[] {
+  const shortTokens = new Set(shorter.split(/\s+/).filter(Boolean));
+  return longer
+    .split(/\s+/)
+    .filter(
+      (token) =>
+        token.length >= 3 &&
+        !shortTokens.has(token) &&
+        !MATCH_QUALIFIERS.has(token)
+    );
+}
+
 function looseMatch(query: string, candidate: string): boolean {
-  return phraseMatch(query, candidate) || phraseMatch(candidate, query);
+  if (phraseMatch(query, candidate)) {
+    return leftoverContent(query, candidate).length === 0;
+  }
+  if (phraseMatch(candidate, query)) {
+    return leftoverContent(candidate, query).length === 0;
+  }
+  return false;
 }
 
 export interface MatchedIngredient extends IngredientNode {
@@ -1065,7 +1283,8 @@ function searchGraph(
 export function findIngredientNode(
   query: string | null | undefined
 ): MatchedIngredient | undefined {
-  const q = normalize(query);
+  const stripped = (query ?? "").replace(/\([^)]*\)/g, " ");
+  const q = normalize(stripped);
   if (!q) return undefined;
 
   const core = searchGraph(q, INGREDIENT_GRAPH, "core");

@@ -1,5 +1,6 @@
 "use client";
 
+import { GapFillForks, potQuantitiesNote } from "@/components/GapFillForks";
 import type { CulinaryPhysicsTip, GourmetRecipe } from "@/types/recipe";
 
 interface RecipeDetailsProps {
@@ -18,6 +19,7 @@ export function RecipeDetails({
   const fatMimicry = recipe.fat_mimicry_tech;
   const otherTips = recipe.culinary_physics_tips.filter((t) => !t.is_fat_mimicry);
   const mimicryTips = recipe.culinary_physics_tips.filter((t) => t.is_fat_mimicry);
+  const potNote = potQuantitiesNote(recipe.servings);
 
   return (
     <div className="space-y-10 border-t border-[var(--border)] pt-10">
@@ -120,6 +122,11 @@ export function RecipeDetails({
           <h3 className="mt-1 font-[family-name:var(--font-display)] text-2xl text-[var(--cream)]">
             Ingredients
           </h3>
+          {potNote && (
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              {potNote}
+            </p>
+          )}
           <ul className="mt-4 space-y-2.5">
             {recipe.ingredients.map((item) => (
               <li
@@ -166,6 +173,7 @@ export function RecipeDetails({
                 </li>
               ))}
           </ol>
+          <GapFillForks recipe={recipe} />
         </div>
       </section>
     </div>

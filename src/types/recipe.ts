@@ -6,6 +6,8 @@
  */
 
 import type {
+  AppliedGapFill,
+  GapSuggestion,
   GlycemicImpact,
   MacroProfile,
   MacroValidation,
@@ -15,6 +17,8 @@ import type {
 } from "./nutrition";
 
 export type {
+  AppliedGapFill,
+  GapSuggestion,
   GlycemicImpact,
   MacroConfidence,
   MacroProfile,
@@ -99,6 +103,14 @@ export interface RecipeStep {
   tip?: string;
 }
 
+/** A complete second plate, not a footnote reconstructed from leftover grams. */
+export interface MethodAlternate {
+  title: string;
+  note: string;
+  ingredients: RecipeIngredient[];
+  steps: RecipeStep[];
+}
+
 /** Visual plating / presentation guidance for the PlatingCard. */
 export interface PlatingGuide {
   /** Primary plating composition description. */
@@ -125,6 +137,26 @@ export type KitchenTool =
   | "grill"
   | "food_processor"
   | "none";
+
+/** How much kitchen work the plate is allowed to ask for. */
+export type CookEffort = "weeknight" | "batch" | "project";
+
+/**
+ * Whether the plate can be bought at a normal supermarket and cooked without
+ * becoming a project. Attached after generation; does not rewrite the dish.
+ */
+export interface CookabilityValidation {
+  /** True when no specialty ingredient appeared (or specialty was explicitly allowed). */
+  supermarket: boolean;
+  specialty_used: string[];
+  /** True when step count / active time fit a weeknight — or effort was not weeknight. */
+  weeknight: boolean;
+  /** True when servings, storage, and reheat fit a batch — or effort was not batch. */
+  batch: boolean;
+  batch_hostile_used: string[];
+  step_count: number;
+  violations: string[];
+}
 
 /** Full gourmet recipe payload returned by the LLM. */
 export interface GourmetRecipe {
@@ -162,8 +194,19 @@ export interface GourmetRecipe {
   macro_validation?: MacroValidation;
   /** Attached when quantities were rescaled to reach the requested target. */
   portion_adjustment?: PortionAdjustment;
+  /**
+   * Flavor-aligned adds or swaps when the scaled plate still misses the
+   * target by more than a rounding error.
+   */
+  gap_suggestions?: GapSuggestion[];
+  /** The one fill that was written into the list and method. */
+  gap_fill_applied?: AppliedGapFill;
+  /** The plate as it stood before that fill — a real list and method. */
+  method_alternate?: MethodAlternate;
   /** Attached post-generation by the FAT_LOSS_RULES compliance check. */
   strategy_validation?: StrategyValidation;
+  /** Attached when supermarket / weeknight / batch policy was checked. */
+  cookability?: CookabilityValidation;
 }
 
 /** Request body for POST /api/generate-recipe. */
@@ -177,6 +220,13 @@ export interface GenerateRecipeRequest {
   nutritional_strategy?: NutritionalStrategy;
   /** Required when the strategy is deep_cut_psmf; the API refuses it otherwise. */
   psmf_acknowledged?: boolean;
+  /**
+   * When true, specialty pantry items (xanthan, konjac, lecithin…) may appear.
+   * Default is supermarket-only — the trip to a health shop is why clients quit.
+   */
+  allow_specialty?: boolean;
+  /** Weeknight caps steps; batch is cook-once leftovers; project allows a longer method. */
+  effort?: CookEffort;
   /** Optional cuisine preference or style notes. */
   cuisine_style?: string;
   dietary_restrictions?: string[];
@@ -196,6 +246,8 @@ export interface ElevateRecipeRequest {
   nutritional_strategy?: NutritionalStrategy;
   /** Required when the strategy is deep_cut_psmf; the API refuses it otherwise. */
   psmf_acknowledged?: boolean;
+  allow_specialty?: boolean;
+  effort?: CookEffort;
   dietary_restrictions?: string[];
   /** Optional Ollama/OpenAI model override (e.g. qwen2.5:32b). */
   model?: string;

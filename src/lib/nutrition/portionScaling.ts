@@ -27,20 +27,34 @@ export const SCALE_GROUPS: ScaleGroup[] = ["protein", "carb", "fat", "produce"];
  * to lose calories without losing food, while produce can never be reduced —
  * trimming vegetables sheds satiety and volume in exchange for almost no
  * energy, which is the opposite of what this product is for.
+ *
+ * Produce also cannot be inflated to chase calories. Zucchini at 25 kcal/100g
+ * times three is a compost heap, not a 480 kcal plate.
  */
 const GROUP_BOUNDS: Record<ScaleGroup, { min: number; max: number }> = {
   protein: { min: 0.5, max: 2.5 },
   carb: { min: 0.25, max: 2.5 },
   fat: { min: 0.2, max: 2.5 },
-  produce: { min: 1, max: 3 },
+  produce: { min: 1, max: 1.15 },
 };
 
 /** Energy density below which an ingredient is bulk/volume rather than a macro source. */
 const PRODUCE_KCAL_PER_100G = 65;
 
+/**
+ * Yogurt, cottage cheese and tofu sit under the produce calorie line but they
+ * are the sauce, not the salad. Anything this protein-dense is a protein role.
+ */
+const PRODUCE_MAX_PROTEIN_G = 8;
+
 /** Assign an ingredient to a role from its per-100g composition. */
 export function classifyGroup(per100g: MacroProfile): ScaleGroup {
-  if (per100g.calories > 0 && per100g.calories < PRODUCE_KCAL_PER_100G) {
+  const proteinDense = (per100g.protein_g ?? 0) >= PRODUCE_MAX_PROTEIN_G;
+  if (
+    per100g.calories > 0 &&
+    per100g.calories < PRODUCE_KCAL_PER_100G &&
+    !proteinDense
+  ) {
     return "produce";
   }
 
@@ -53,6 +67,23 @@ export function classifyGroup(per100g: MacroProfile): ScaleGroup {
   if (max === proteinKcal) return "protein";
   if (max === fatKcal) return "fat";
   return "carb";
+}
+
+/**
+ * Yogurt and cottage cheese are protein-dense enough to be a sauce, not a steak.
+ * Scaling them to hit a protein floor produces a tub of dairy, not a plate.
+ */
+export function isSauceProtein(per100g: MacroProfile): boolean {
+  return classifyGroup(per100g) === "protein" && per100g.calories < 80;
+}
+
+/**
+ * Muscle on the plate — chicken, shrimp, fish, turkey. Whey (too dense) and
+ * yogurt (too light) are not this. This is the protein vehicle the floor uses.
+ */
+export function isLeanMuscle(per100g: MacroProfile): boolean {
+  if (classifyGroup(per100g) !== "protein") return false;
+  return per100g.calories >= 80 && per100g.calories <= 280;
 }
 
 export interface ScalingProblem {

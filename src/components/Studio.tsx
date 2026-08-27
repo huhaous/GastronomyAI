@@ -23,6 +23,7 @@ import {
 import type { RecipePayload, SavedRecipe } from "@/lib/storage/recipeStore";
 import { useSavedRecipes } from "@/lib/storage/useSavedRecipes";
 import type {
+  CookEffort,
   ElevatedRecipe,
   GourmetRecipe,
   KitchenTool,
@@ -167,6 +168,8 @@ export function Studio() {
   );
   const [psmfAcknowledged, setPsmfAcknowledged] = useState(false);
   const [psmfPanelOpen, setPsmfPanelOpen] = useState(false);
+  const [allowSpecialty, setAllowSpecialty] = useState(false);
+  const [effort, setEffort] = useState<CookEffort>("weeknight");
   const [result, setResult] = useState<StudioResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -220,6 +223,8 @@ export function Studio() {
         cuisine_style: cuisine.trim() || undefined,
         nutritional_strategy: strategy,
         psmf_acknowledged: psmfAcknowledged,
+        allow_specialty: allowSpecialty,
+        effort,
         model: modelId,
       }),
     });
@@ -248,6 +253,8 @@ export function Studio() {
         time_limit_minutes: Number(elevateTime) || undefined,
         nutritional_strategy: strategy,
         psmf_acknowledged: psmfAcknowledged,
+        allow_specialty: allowSpecialty,
+        effort,
         model: modelId,
       }),
     });
@@ -457,6 +464,129 @@ export function Studio() {
         </div>
 
         <div>
+          <FieldLabel>Kitchen</FieldLabel>
+          <p className="mb-3 max-w-xl text-sm text-[var(--cream-dim)]">
+            Default is a supermarket weeknight — the plate has to be cookable
+            after work, not after a trip to a health shop. Batch is the same
+            shop, cooked once for the days you will not cook.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!allowSpecialty}
+              onClick={() => setAllowSpecialty(false)}
+              className={`border px-4 py-3 text-left transition ${
+                !allowSpecialty
+                  ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)]"
+                  : "border-[var(--border)] hover:border-[var(--gold-dim)]"
+              }`}
+            >
+              <span
+                className={`block text-xs uppercase tracking-[0.14em] ${
+                  !allowSpecialty ? "text-[var(--gold)]" : "text-[var(--cream)]"
+                }`}
+              >
+                Supermarket
+              </span>
+              <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                Yogurt, a blender, a hard sear. No xanthan, konjac, gums.
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={allowSpecialty}
+              onClick={() => setAllowSpecialty(true)}
+              className={`border px-4 py-3 text-left transition ${
+                allowSpecialty
+                  ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)]"
+                  : "border-dashed border-[var(--border)] hover:border-[var(--gold-dim)]"
+              }`}
+            >
+              <span
+                className={`block text-xs uppercase tracking-[0.14em] ${
+                  allowSpecialty ? "text-[var(--gold)]" : "text-[var(--cream-dim)]"
+                }`}
+              >
+                Specialty pantry
+              </span>
+              <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                Unlock gums and konjac if you already own them.
+              </span>
+            </button>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={effort === "weeknight"}
+              onClick={() => setEffort("weeknight")}
+              className={`border px-4 py-3 text-left transition ${
+                effort === "weeknight"
+                  ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)]"
+                  : "border-[var(--border)] hover:border-[var(--gold-dim)]"
+              }`}
+            >
+              <span
+                className={`block text-xs uppercase tracking-[0.14em] ${
+                  effort === "weeknight" ? "text-[var(--gold)]" : "text-[var(--cream)]"
+                }`}
+              >
+                Weeknight
+              </span>
+              <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                At most six steps, one pan, inside the time limit.
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={effort === "batch"}
+              onClick={() => setEffort("batch")}
+              className={`border px-4 py-3 text-left transition ${
+                effort === "batch"
+                  ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)]"
+                  : "border-[var(--border)] hover:border-[var(--gold-dim)]"
+              }`}
+            >
+              <span
+                className={`block text-xs uppercase tracking-[0.14em] ${
+                  effort === "batch" ? "text-[var(--gold)]" : "text-[var(--cream)]"
+                }`}
+              >
+                Batch
+              </span>
+              <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                Cook once, 3–4 portions that reheat.
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={effort === "project"}
+              onClick={() => setEffort("project")}
+              className={`border px-4 py-3 text-left transition ${
+                effort === "project"
+                  ? "border-[var(--gold)] bg-[color-mix(in_srgb,var(--gold)_10%,transparent)]"
+                  : "border-dashed border-[var(--border)] hover:border-[var(--gold-dim)]"
+              }`}
+            >
+              <span
+                className={`block text-xs uppercase tracking-[0.14em] ${
+                  effort === "project" ? "text-[var(--gold)]" : "text-[var(--cream-dim)]"
+                }`}
+              >
+                I have time
+              </span>
+              <span className="mt-1 block text-[11px] text-[var(--muted)]">
+                A longer method is allowed.
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div>
           <FieldLabel>Local model</FieldLabel>
           <div
             className="flex flex-wrap gap-2"
@@ -562,7 +692,11 @@ export function Studio() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <FieldLabel>Time limit (minutes)</FieldLabel>
+                <FieldLabel>
+                  {effort === "batch"
+                    ? "Cook session (minutes)"
+                    : "Time limit (minutes)"}
+                </FieldLabel>
                 <input
                   className={inputClass}
                   type="number"
@@ -634,7 +768,11 @@ export function Studio() {
                 />
               </div>
               <div>
-                <FieldLabel>Time limit (minutes)</FieldLabel>
+                <FieldLabel>
+                  {effort === "batch"
+                    ? "Cook session (minutes)"
+                    : "Time limit (minutes)"}
+                </FieldLabel>
                 <input
                   className={inputClass}
                   type="number"

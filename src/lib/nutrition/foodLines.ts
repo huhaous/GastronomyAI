@@ -13,6 +13,7 @@ import {
   findIngredientNode,
   isAromatic,
   type HouseholdMeasures,
+  type IngredientNode,
 } from "@/data/knowledgeGraph";
 import type { MacroProfile } from "@/types/nutrition";
 
@@ -220,6 +221,70 @@ export interface ResolvedLine {
 /** Household measures that describe a countable item rather than a volume. */
 const COUNT_MEASURES = new Set(["clove", "piece"]);
 
+function isWeightUnitToken(unit: string): boolean {
+  return WEIGHT_UNIT_GRAMS[unit] != null;
+}
+
+/**
+ * The prompt forbids "piece" as a unit, so the model writes "1" bun as "1g"
+ * and "4" lettuce leaves as "4g". Those are counts, not weigh-ins: a bun is
+ * ~70g, a leaf ~15g. Integers 1–8 that are far below the node's piece weight
+ * are piece counts.
+ */
+export function looksLikePieceCount(
+  amount: number,
+  unit: string,
+  node: IngredientNode
+): boolean {
+  if (!node.handling?.countAsPiece) return false;
+  const piece = node.gramsPer?.piece;
+  if (!piece || piece < 8) return false;
+  if (!isWeightUnitToken(unit)) return false;
+  if (!Number.isInteger(amount) || amount < 1 || amount > 8) return false;
+  return amount * WEIGHT_UNIT_GRAMS[unit] < piece * 0.5;
+}
+
+function pieceNote(node: IngredientNode, count: number): string {
+  const name = (node.cookName ?? node.name).toLowerCase();
+  if (/bun|roll/.test(name)) return count === 1 ? "1 bun" : `${count} buns`;
+  if (/lettuce|greens|leaf/.test(name)) {
+    return count === 1 ? "1 leaf" : `${count} leaves`;
+  }
+  return count === 1 ? "1 piece" : `${count} pieces`;
+}
+
+export interface PieceLine extends FoodLine {
+  notes?: string;
+}
+
+/**
+ * Rewrite mislabelled piece counts onto the printed list so the card shows
+ * 70g bun, not 1g. Idempotent once the line is already a real weigh-in.
+ */
+export function repairPieceQuantities<T extends { ingredients: PieceLine[] }>(
+  recipe: T
+): T {
+  let changed = false;
+  const ingredients = recipe.ingredients.map((item) => {
+    const node = findIngredientNode(item.name);
+    if (!node) return item;
+    const amount = parseAmount(item.quantity);
+    if (amount == null) return item;
+    const unit = resolveUnitToken(item);
+    if (!looksLikePieceCount(amount, unit, node)) return item;
+    const piece = node.gramsPer!.piece!;
+    const grams = Math.round(amount * piece * WEIGHT_UNIT_GRAMS[unit]);
+    const note = pieceNote(node, amount);
+    const notes =
+      item.notes && item.notes.toLowerCase().includes(note)
+        ? item.notes
+        : [item.notes, note].filter(Boolean).join("; ");
+    changed = true;
+    return { ...item, quantity: String(grams), unit: "g", notes };
+  });
+  return changed ? { ...recipe, ingredients } : recipe;
+}
+
 /** Resolve one food line to grams + macros, or mark it unresolved. */
 export function resolveFoodLine(line: FoodLine): ResolvedLine {
   // Models occasionally emit a line with no name at all. It cannot be priced or
@@ -251,7 +316,9 @@ export function resolveFoodLine(line: FoodLine): ResolvedLine {
   let unitKind: UnitKind = "weight";
 
   if (WEIGHT_UNIT_GRAMS[unit] != null) {
-    grams = amount * WEIGHT_UNIT_GRAMS[unit];
+    grams = looksLikePieceCount(amount, unit, node)
+      ? amount * (node.gramsPer?.piece ?? 0) * WEIGHT_UNIT_GRAMS[unit]
+      : amount * WEIGHT_UNIT_GRAMS[unit];
   } else {
     const measure = MEASURE_ALIASES[unit];
     if (measure) {

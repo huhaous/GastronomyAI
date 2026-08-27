@@ -73,6 +73,33 @@ export interface PortionAdjustment {
   bounded: boolean;
 }
 
+/**
+ * A flavor-aligned add or swap that can close a target the current pantry
+ * cannot reach without portions that stop resembling a plate.
+ */
+export interface GapSuggestion {
+  kind: "add" | "swap";
+  ingredient: string;
+  /** Cook amount, grams, per serving. */
+  grams: number;
+  /** For a swap, the volume-filler being replaced. */
+  replaces?: string;
+  /** Signed; negative if the suggestion is a reduction. */
+  calories_added: number;
+  resulting_calories: number;
+  /** Why this keeps the dish's flavor rather than just moving the number. */
+  flavor_note: string;
+  /** True when the result lands within 10% of the requested energy. */
+  closes_gap: boolean;
+}
+
+/** The gap-fill that was written into the ingredient list and method. */
+export interface AppliedGapFill extends GapSuggestion {
+  /** Grams on the list and in the pot — recipe total. */
+  grams_in_recipe: number;
+  servings: number;
+}
+
 /** Compliance report against FAT_LOSS_RULES for the requested strategy. */
 export interface StrategyValidation {
   strategy: NutritionalStrategy;
