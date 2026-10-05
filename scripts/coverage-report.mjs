@@ -28,6 +28,8 @@ const REASON_LABEL = {
 
 const misses = new Map();
 const confidence = { verified: 0, partial: 0, unverified: 0 };
+const cravings = new Map();
+const browsers = new Set();
 let generations = 0;
 let malformed = 0;
 let unresolvedLines = 0;
@@ -53,6 +55,20 @@ for await (const line of reader) {
   confidence[record.confidence] = (confidence[record.confidence] ?? 0) + 1;
   totalLines += record.total_ingredients ?? 0;
   unresolvedLines += record.unresolved?.length ?? 0;
+
+  if (record.anon_id) browsers.add(record.anon_id);
+
+  const asked = (record.craving ?? "").trim();
+  if (asked) {
+    const entry = cravings.get(asked.toLowerCase()) ?? {
+      craving: asked,
+      runs: 0,
+      missed: 0,
+    };
+    entry.runs += 1;
+    if (record.confidence !== "verified") entry.missed += 1;
+    cravings.set(asked.toLowerCase(), entry);
+  }
 
   for (const item of record.unresolved ?? []) {
     const name = (item.name ?? "").trim() || "(unnamed line)";
@@ -88,7 +104,24 @@ console.log(
     totalLines
   )})`
 );
+if (browsers.size > 0) console.log(`  distinct browsers ${browsers.size}`);
 if (malformed > 0) console.log(`  skipped ${malformed} malformed line(s)`);
+
+// What someone typed and did not get a verified plate for. This is the only
+// view that names a craving the engine cannot yet cook, rather than an
+// ingredient the graph cannot price.
+const shaky = [...cravings.values()]
+  .filter((row) => row.missed > 0)
+  .sort((a, b) => b.missed - a.missed || b.runs - a.runs);
+if (shaky.length > 0) {
+  console.log(`\nCravings that came back unverified:\n`);
+  const width = Math.min(34, Math.max(...shaky.map((row) => row.craving.length)));
+  for (const row of shaky.slice(0, 15)) {
+    const name = row.craving.padEnd(width).slice(0, width);
+    console.log(`  ${String(row.missed).padStart(3)}/${row.runs}  ${name}`);
+  }
+  if (shaky.length > 15) console.log(`  … and ${shaky.length - 15} more`);
+}
 
 if (misses.size === 0) {
   console.log("\nNothing unresolved. The graph covered every ingredient.\n");

@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "npx tsx scripts/method-scrub-smoke.ts && npx tsx scripts/method-integrity-smoke.ts && npx tsx scripts/portion-adjust-smoke.ts && npx tsx scripts/gap-fill-smoke.ts && npx tsx scripts/cookability-smoke.ts && npx tsx scripts/llm-config-smoke.ts",
+    "test": "npx tsx scripts/method-scrub-smoke.ts && npx tsx scripts/method-integrity-smoke.ts && npx tsx scripts/portion-adjust-smoke.ts && npx tsx scripts/gap-fill-smoke.ts && npx tsx scripts/cookability-smoke.ts && npx tsx scripts/llm-config-smoke.ts && npx tsx scripts/coverage-log-smoke.ts",
     "coverage": "node scripts/coverage-report.mjs",
+    "coverage:pull": "node scripts/coverage-pull.mjs",
     "coverage:seed": "node scripts/coverage-seed.mjs",
     "llm:serve": "ollama serve",
     "llm:pull": "ollama pull qwen2.5:32b",
@@ -16,6 +17,7 @@
     "llm:pull:quality": "ollama pull qwen2.5:32b"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "next": "16.3.0",
     "openai": "^7.4.0",
     "react": "19.2.8",

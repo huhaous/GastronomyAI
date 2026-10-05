@@ -13,7 +13,14 @@ const RUNTIME_ENV = [
   "OPENAI_MODEL",
   "SITE_PASSWORD",
 ];
-const SENSITIVE = new Set(["OPENAI_API_KEY", "SITE_PASSWORD"]);
+// Connecting a Blob store to the project already injects this. Pushing it from
+// .env.local only matters for a store created outside the project.
+const OPTIONAL_ENV = ["BLOB_READ_WRITE_TOKEN"];
+const SENSITIVE = new Set([
+  "OPENAI_API_KEY",
+  "SITE_PASSWORD",
+  "BLOB_READ_WRITE_TOKEN",
+]);
 
 function parseEnv(raw) {
   const out = {};
@@ -84,7 +91,7 @@ console.log("Linking project…");
 await run(["vercel", "link", "--yes", "--project", "gastronomy-ai"]);
 
 console.log("Writing production environment (values not printed)…");
-for (const key of RUNTIME_ENV) {
+for (const key of [...RUNTIME_ENV, ...OPTIONAL_ENV.filter((k) => file[k])]) {
   const args = [
     "vercel",
     "env",

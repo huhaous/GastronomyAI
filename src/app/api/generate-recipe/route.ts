@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateGourmetRecipe } from "@/lib/ai/openai";
 import { GenerateRecipeRequestSchema } from "@/lib/ai/schema";
 import { isUpstreamUnavailable } from "@/lib/ai/upstream";
+import { readAnonId } from "@/lib/telemetry/anonId";
 import type { GenerateRecipeRequest, KitchenTool } from "@/types/recipe";
 
 export const runtime = "nodejs";
@@ -27,7 +28,9 @@ export async function POST(request: Request) {
       kitchen_tools: parsed.data.kitchen_tools as KitchenTool[],
     };
 
-    const { recipe, model } = await generateGourmetRecipe(payload);
+    const { recipe, model } = await generateGourmetRecipe(payload, {
+      anonId: readAnonId(request.headers),
+    });
 
     return NextResponse.json({ kind: "generate", recipe, model });
   } catch (err) {

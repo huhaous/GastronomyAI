@@ -362,7 +362,7 @@ function bloomAlliumsBeforeColdDairy<T extends GourmetRecipe>(recipe: T): T {
 
   if (onPlate.length === 0) return recipe;
 
-  let steps = recipe.steps.map((step) => ({ ...step }));
+  const steps = recipe.steps.map((step) => ({ ...step }));
   const ordered = steps.slice().sort((a, b) => a.order - b.order);
 
   for (const node of onPlate) {
@@ -1464,7 +1464,7 @@ function packWeeknightSteps<T extends GourmetRecipe>(
 ): T {
   if (effort === "project" || effort === "batch") return recipe;
   if (pastaGrams(recipe) != null) return recipe;
-  let steps = recipe.steps.slice().sort((a, b) => a.order - b.order);
+  const steps = recipe.steps.slice().sort((a, b) => a.order - b.order);
   const max = 4;
   if (steps.length <= max) return recipe;
 

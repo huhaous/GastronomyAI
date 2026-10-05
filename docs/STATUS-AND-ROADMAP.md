@@ -55,11 +55,29 @@ The recipe engine is the product. Local `next dev` is the research lab. Path A (
 | Server persistence | Kept plates die if the PT clears site data or switches phones. You cannot see their kitchen. |
 | Durable share link | Print / native share only. |
 | Auth / database client | `.env.example` has empty Supabase keys. No `@supabase/supabase-js`, no tables. Path B. |
+| Per-user identity | One shared `SITE_PASSWORD`; the gate cookie is an HMAC of a fixed message, so every browser presents the same value. You cannot revoke one person without locking out all of them. |
+| Spend control | No rate limit, no quota, no `max_tokens`, `maxDuration = 300`. Anyone past the gate can spend the OpenAI key without attribution. |
+
+### Before widening past two or three seed users
+
+Both rows above become real the moment the password travels further than a
+conversation. The spend ceiling is the cheaper of the two and does not need
+accounts; per-user revocation does, which makes it Path B work.
 
 ### Known engine gaps (not deploy blockers)
 
 - Stir-fry compactness is still not a wok cook. Leftover / pouch rice is `reheat`, not a dry `simmer`. A new cook is a new `starchCook` on a node, not a dish file.
 - `carbonaraEmulsion.ts` remains as a lecithin helper; identity must stay plate-driven.
+
+### Seeing what users actually cooked
+
+Hosted generations write a coverage record to a private Blob store
+(`npm run coverage:pull`, then `npm run coverage -- var/coverage-prod.jsonl`).
+The report names cravings that came back unverified, which is the list of dishes
+the engine cannot yet cook — distinct from the unresolved-ingredient backlog,
+which is the list of foods the graph cannot yet price. Without a store
+configured, production logs to the console and the history is only as long as
+Vercel's retention.
 
 ### Explicit non-goals for the next cut
 

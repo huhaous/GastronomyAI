@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { elevateCravingRecipe } from "@/lib/ai/openai";
 import { ElevateRecipeRequestSchema } from "@/lib/ai/schema";
 import { isUpstreamUnavailable } from "@/lib/ai/upstream";
+import { readAnonId } from "@/lib/telemetry/anonId";
 import type { ElevateRecipeRequest, KitchenTool } from "@/types/recipe";
 
 export const runtime = "nodejs";
@@ -27,7 +28,9 @@ export async function POST(request: Request) {
       kitchen_tools: parsed.data.kitchen_tools as KitchenTool[] | undefined,
     };
 
-    const { recipe, model } = await elevateCravingRecipe(payload);
+    const { recipe, model } = await elevateCravingRecipe(payload, {
+      anonId: readAnonId(request.headers),
+    });
 
     return NextResponse.json({ kind: "elevate", recipe, model });
   } catch (err) {

@@ -87,6 +87,14 @@ function buildSystemMessages(params: {
  * establishes what the model's quantities really produce, the second reprices
  * the rewritten quantities so the reported macros describe the served plate.
  */
+/**
+ * Server-set, never part of the request schema — a client that could name its
+ * own session could also forge someone else's.
+ */
+export interface GenerationSession {
+  anonId?: string;
+}
+
 function finalizeRecipe<T extends GourmetRecipe>(
   incoming: T,
   context: {
@@ -99,6 +107,7 @@ function finalizeRecipe<T extends GourmetRecipe>(
     effort?: CookEffort;
     timeLimitMinutes?: number;
     craving?: string;
+    anonId?: string;
   }
 ): T {
   const cravingEarly =
@@ -220,7 +229,9 @@ function finalizeRecipe<T extends GourmetRecipe>(
     mode: context.mode,
     model: context.model,
     strategy: effectiveStrategy,
+    craving: craving || undefined,
     dish: working.name,
+    anon_id: context.anonId,
     confidence: coverageResult.validation.confidence,
     resolved_ingredients: coverageResult.validation.resolved_ingredients,
     total_ingredients: coverageResult.validation.total_ingredients,
@@ -289,7 +300,8 @@ function responseFormat(
 }
 
 export async function generateGourmetRecipe(
-  request: GenerateRecipeRequest
+  request: GenerateRecipeRequest,
+  session?: GenerationSession
 ): Promise<{ recipe: GourmetRecipe; model: string }> {
   const { client, model, useStrictJsonSchema } = getClient(request.model);
   const userPrompt = GENERATE_RECIPE_USER_TEMPLATE({
@@ -335,13 +347,15 @@ export async function generateGourmetRecipe(
     allowSpecialty: request.allow_specialty,
     effort: request.effort,
     timeLimitMinutes: request.time_limit_minutes,
+    anonId: session?.anonId,
   });
 
   return { recipe, model };
 }
 
 export async function elevateCravingRecipe(
-  request: ElevateRecipeRequest
+  request: ElevateRecipeRequest,
+  session?: GenerationSession
 ): Promise<{ recipe: ElevatedRecipe; model: string }> {
   const { client, model, useStrictJsonSchema } = getClient(request.model);
   const userPrompt = ELEVATE_RECIPE_USER_TEMPLATE({
@@ -387,6 +401,7 @@ export async function elevateCravingRecipe(
       effort: request.effort,
       timeLimitMinutes: request.time_limit_minutes,
       craving: request.craving_meal,
+      anonId: session?.anonId,
     })
   );
 

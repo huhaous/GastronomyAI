@@ -8,12 +8,35 @@ import {
   isValidGateCookie,
   sitePassword,
 } from "@/lib/auth/gate";
+import {
+  ANON_COOKIE,
+  anonCookieOptions,
+  isAnonId,
+  newAnonId,
+} from "@/lib/telemetry/anonId";
 
 export function proxy(request: NextRequest) {
-  if (!gateIsRequired()) return NextResponse.next();
+  const existing = request.cookies.get(ANON_COOKIE)?.value;
+  const anonId = isAnonId(existing) ? existing : newAnonId();
+
+  // Issued here rather than at the gate so a record exists even on the paths
+  // that never see a password: the id is what separates two seed users whose
+  // gate cookies are identical by construction.
+  const stamp = (response: NextResponse) => {
+    if (existing !== anonId) {
+      response.cookies.set({
+        name: ANON_COOKIE,
+        value: anonId,
+        ...anonCookieOptions(),
+      });
+    }
+    return response;
+  };
+
+  if (!gateIsRequired()) return stamp(NextResponse.next());
 
   const { pathname } = request.nextUrl;
-  if (isPublicGatePath(pathname)) return NextResponse.next();
+  if (isPublicGatePath(pathname)) return stamp(NextResponse.next());
 
   const password = sitePassword();
   if (!password) {
@@ -26,11 +49,11 @@ export function proxy(request: NextRequest) {
         { status: 503 }
       );
     }
-    return NextResponse.redirect(new URL(GATE_PATH, request.url));
+    return stamp(NextResponse.redirect(new URL(GATE_PATH, request.url)));
   }
 
   const cookie = request.cookies.get(GATE_COOKIE)?.value;
-  if (isValidGateCookie(cookie, password)) return NextResponse.next();
+  if (isValidGateCookie(cookie, password)) return stamp(NextResponse.next());
 
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(
@@ -45,7 +68,7 @@ export function proxy(request: NextRequest) {
   const gate = new URL(GATE_PATH, request.url);
   const from = `${pathname}${request.nextUrl.search}`;
   if (from && from !== "/") gate.searchParams.set("from", from);
-  return NextResponse.redirect(gate);
+  return stamp(NextResponse.redirect(gate));
 }
 
 export const config = {

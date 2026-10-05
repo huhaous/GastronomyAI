@@ -88,14 +88,31 @@ Plates still live in **the PT's browser**. Clearing site data deletes the kitche
 
 ## Graph coverage log
 
-Every generation appends a record to `var/coverage.jsonl` (gitignored) describing
-which ingredient lines the Knowledge Graph could price and why the rest failed —
-missing node, unparseable quantity, or unknown unit.
+Every generation records which ingredient lines the Knowledge Graph could price
+and why the rest failed — missing node, unparseable quantity, or unknown unit —
+alongside the craving that was typed and a random per-browser id that groups one
+person's run without identifying them.
+
+Locally this appends to `var/coverage.jsonl` (gitignored) with no setup:
 
 ```bash
 npm run coverage             # ranked backlog of what to add to the graph next
 COVERAGE_LOG=off npm run dev # opt out
 ```
+
+A hosted deploy has no writable disk, so the same append fails and the log
+silently switches itself off — every plate a user makes is then lost. Give it a
+**private** Blob store instead (Vercel → Storage → Blob → access: Private,
+connected to the project). Private matters: a record carries the craving the
+diner typed. With no store configured, production falls back to console logging
+so a misconfigured deploy is noisy rather than silent.
+
+```bash
+npm run coverage:pull                       # store → var/coverage-prod.jsonl
+npm run coverage -- var/coverage-prod.jsonl # same report, hosted data
+```
+
+Pulling needs `BLOB_READ_WRITE_TOKEN` in `.env.local`.
 
 ## Core types
 

@@ -954,7 +954,7 @@ export function applyGapFill<T extends GourmetRecipe>(
   const cookName = titleCookName(suggestion.ingredient);
   const pricedDry = /dry/i.test(suggestion.ingredient);
 
-  let ingredients = recipe.ingredients.map((item) => ({ ...item }));
+  const ingredients = recipe.ingredients.map((item) => ({ ...item }));
   let steps = recipe.steps.map((step) => ({ ...step }));
   let plating = recipe.plating;
   let alternate: MethodAlternate | undefined;
