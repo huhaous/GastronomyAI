@@ -11,6 +11,10 @@ const UNAVAILABLE_SIGNALS = [
   "connection error",
   "socket hang up",
   "etimedout",
+  "timed out",
+  "timeout",
+  "429",
+  "rate limit",
 ];
 
 export function isUpstreamUnavailable(message: string): boolean {

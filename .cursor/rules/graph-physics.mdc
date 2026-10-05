@@ -1,0 +1,21 @@
+---
+description: Graph physics over bandaid cook patches — always on for this repo.
+alwaysApply: true
+---
+
+# Graph physics (not optional)
+
+Before changing cook, graph, scaler, Elevate, or method-integrity code, follow `.cursor/skills/graph-physics/SKILL.md`.
+
+Hard bans:
+
+- No `ensureCarbonara` / `ensureTikka` / `ensureMapo` / dish-named hooks
+- No craving regex lists (`tikka|alfredo|carbonara|mapo`)
+- No growing `isBrokenFragment` or tidy regexes for one new method hole
+- No deleting a noun and patching leftover grammar (`and until`, `the cooked`)
+- No `Add the X, Y, and Z` dump step
+- No yogurt-as-default fat-mimicry
+
+Required shape: physics on a graph node (`starchCook`, `starchFamily`, `methodRole`, `saucePhysics`, `elevationRole`). Off-plate **cook** is dropped; remaining foods **compile** from those roles. One plate, one starch cook, one sauce physics. Calorie cap is a solver ceiling.
+
+If a change is a hole-regex or a dish list, undo it and put the rule on a node.

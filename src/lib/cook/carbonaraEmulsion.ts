@@ -8,10 +8,10 @@
  */
 
 import { findIngredientNode } from "@/data/knowledgeGraph";
+import { inferMealIdentity } from "@/lib/cook/mealIdentity";
 import { resolveFoodLines } from "@/lib/nutrition/foodLines";
 import type { GourmetRecipe, RecipeIngredient } from "@/types/recipe";
 
-const CARBONARA = /carbonara/i;
 const COLD_DAIRY = /yogurt|yoghurt|cottage cheese|quark|fromage blanc/i;
 
 const WHITE_GRAMS = 35;
@@ -22,14 +22,6 @@ const YOLK_FAT_BUDGET_PERCENT = 18;
 export interface CarbonaraEmulsionOptions {
   craving?: string;
   targetCalories?: number;
-}
-
-function plateText<T extends GourmetRecipe>(recipe: T, craving?: string): string {
-  const original =
-    "original_craving" in recipe
-      ? String((recipe as { original_craving?: string }).original_craving ?? "")
-      : "";
-  return `${craving ?? ""} ${original} ${recipe.name}`;
 }
 
 function hasPasta<T extends GourmetRecipe>(recipe: T): boolean {
@@ -54,11 +46,11 @@ export function emulsionEggOnPlate<T extends GourmetRecipe>(
   });
 }
 
-function wantsCarbonara<T extends GourmetRecipe>(
+function wantsLecithinEmulsion<T extends GourmetRecipe>(
   recipe: T,
   craving?: string
 ): boolean {
-  return CARBONARA.test(plateText(recipe, craving));
+  return inferMealIdentity(recipe, craving).saucePhysics === "lecithin_emulsion";
 }
 
 function chooseEmulsionEgg<T extends GourmetRecipe>(
@@ -112,8 +104,8 @@ function stampMimicry<T extends GourmetRecipe>(recipe: T, eggName: string): T {
         ? "Lecithin from one egg yolk and shear from Greek yogurt bind reserved pasta water into a glossy, yellow coating. Residual heat sets the emulsion; a live flame scrambles it."
         : "Liquid egg whites and Greek yogurt bind reserved pasta water into a carbonara set without a fat spike. Residual heat only — never scramble.",
       mouthfeel_result: yolk
-        ? "Silk that clings like classic carbonara, pale gold from the yolk, without a cream or pancetta fat spike."
-        : "A clingy carbonara set from egg white and pasta water, richness from yogurt instead of pork fat.",
+        ? "Silk that clings, pale gold from the yolk, loud with pepper and cheese."
+        : "A clingy set from egg white and pasta water, loud with pepper and cheese.",
       agents: uniqueAgents(recipe.fat_mimicry_tech?.agents, [
         "Greek yogurt",
         eggName,
@@ -132,7 +124,7 @@ export function ensureCarbonaraEmulsion<T extends GourmetRecipe>(
   recipe: T,
   options?: CarbonaraEmulsionOptions
 ): T {
-  if (!wantsCarbonara(recipe, options?.craving)) return recipe;
+  if (!wantsLecithinEmulsion(recipe, options?.craving)) return recipe;
   if (!hasPasta(recipe) || !hasYogurtSauce(recipe)) return recipe;
 
   const existing = emulsionEggOnPlate(recipe);

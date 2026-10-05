@@ -8,6 +8,7 @@ import {
   LOCAL_MODEL_OPTIONS,
   type LocalModelId,
 } from "@/lib/ai/models";
+import { RESEARCH_STUDIO } from "@/lib/studioSurface";
 import { KITCHEN_TOOL_OPTIONS } from "@/lib/kitchenTools";
 import {
   DEFAULT_NUTRITIONAL_STRATEGY,
@@ -45,7 +46,29 @@ type StudioResult =
   | { kind: "generate"; recipe: GourmetRecipe; model?: string }
   | { kind: "elevate"; recipe: ElevatedRecipe; model?: string };
 
-const DEFAULT_TOOLS: KitchenTool[] = ["stovetop", "oven", "blender"];
+const DEFAULT_TOOLS: KitchenTool[] = RESEARCH_STUDIO
+  ? ["stovetop", "oven", "blender"]
+  : ["stovetop", "oven"];
+
+const ELEVATE_WAIT_MS = 180_000;
+
+function describeStudioError(err: unknown): string {
+  const message = err instanceof Error ? err.message : "Something went wrong";
+  const lower = message.toLowerCase();
+  if (lower.includes("aborted") || lower.includes("timeout") || lower.includes("timed out")) {
+    return "The model took too long. Try again — a miss is cheaper than a hung tab.";
+  }
+  if (lower.includes("openai_api_key") || lower.includes("llm_provider=openai")) {
+    return "The hosted model is not configured yet. Add OPENAI_API_KEY on the server.";
+  }
+  if (lower.includes("sign in required")) {
+    return "The site lock expired. Refresh and enter the password again.";
+  }
+  if (lower.includes("site lock is not configured")) {
+    return "SITE_PASSWORD is missing on this host. Set it before anyone can Elevate.";
+  }
+  return message;
+}
 
 function parseList(raw: string): string[] {
   return raw
@@ -137,6 +160,11 @@ function KeptPlates({
                 }`}
               >
                 {entry.title ?? entry.payload.recipe.name}
+                {entry.client ? (
+                  <span className="block text-[11px] text-[var(--muted)]">
+                    For {entry.client}
+                  </span>
+                ) : null}
               </button>
               <span className="flex items-center gap-4 text-[11px] text-[var(--muted)]">
                 <span>
@@ -160,8 +188,8 @@ function KeptPlates({
   );
 }
 
-export function Studio() {
-  const [mode, setMode] = useState<StudioMode>("generate");
+export function Studio({ logout }: { logout?: ReactNode } = {}) {
+  const [mode, setMode] = useState<StudioMode>("elevate");
   const [modelId, setModelId] = useState<LocalModelId>(DEFAULT_LOCAL_MODEL);
   const [strategy, setStrategy] = useState<NutritionalStrategy>(
     DEFAULT_NUTRITIONAL_STRATEGY
@@ -177,6 +205,7 @@ export function Studio() {
   const { entries: keptPlates, save, remove } = useSavedRecipes();
   /** Set once the plate on screen exists in the store, so it isn't kept twice. */
   const [keptId, setKeptId] = useState<string | null>(null);
+  const [clientName, setClientName] = useState("");
 
   const [calories, setCalories] = useState("450");
   const [protein, setProtein] = useState("35");
@@ -192,7 +221,7 @@ export function Studio() {
   const [craving, setCraving] = useState("Fettuccine Alfredo");
   const [elevateCalories, setElevateCalories] = useState("480");
   const [elevateProtein, setElevateProtein] = useState("40");
-  const [elevateTime, setElevateTime] = useState("45");
+  const [elevateTime, setElevateTime] = useState("15");
   const [elevateTools, setElevateTools] = useState<KitchenTool[]>(DEFAULT_TOOLS);
 
   function toggleTool(
@@ -210,6 +239,7 @@ export function Studio() {
     const res = await fetch("/api/generate-recipe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(ELEVATE_WAIT_MS),
       body: JSON.stringify({
         target_macros: {
           calories: Number(calories),
@@ -225,7 +255,7 @@ export function Studio() {
         psmf_acknowledged: psmfAcknowledged,
         allow_specialty: allowSpecialty,
         effort,
-        model: modelId,
+        ...(RESEARCH_STUDIO ? { model: modelId } : {}),
       }),
     });
 
@@ -243,6 +273,7 @@ export function Studio() {
     const res = await fetch("/api/elevate-recipe", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(ELEVATE_WAIT_MS),
       body: JSON.stringify({
         craving_meal: craving.trim(),
         target_macros: {
@@ -252,10 +283,10 @@ export function Studio() {
         kitchen_tools: elevateTools,
         time_limit_minutes: Number(elevateTime) || undefined,
         nutritional_strategy: strategy,
-        psmf_acknowledged: psmfAcknowledged,
-        allow_specialty: allowSpecialty,
+        psmf_acknowledged: RESEARCH_STUDIO ? psmfAcknowledged : false,
+        allow_specialty: RESEARCH_STUDIO ? allowSpecialty : false,
         effort,
-        model: modelId,
+        ...(RESEARCH_STUDIO ? { model: modelId } : {}),
       }),
     });
 
@@ -274,7 +305,12 @@ export function Studio() {
       result.kind === "generate"
         ? { kind: "generate", recipe: result.recipe }
         : { kind: "elevate", recipe: result.recipe };
-    const saved = await save(payload, { model: result.model });
+    const named = clientName.trim();
+    const saved = await save(payload, {
+      model: result.model,
+      client: named || undefined,
+      note: named ? `For ${named}` : undefined,
+    });
     setKeptId(saved.id);
   }
 
@@ -282,6 +318,7 @@ export function Studio() {
     setError(null);
     setResult({ ...entry.payload, model: entry.model });
     setKeptId(entry.id);
+    setClientName(entry.client ?? "");
   }
 
   async function removeKept(id: string) {
@@ -293,14 +330,14 @@ export function Studio() {
     e.preventDefault();
     startTransition(async () => {
       try {
-        if (mode === "generate") {
+        if (RESEARCH_STUDIO && mode === "generate") {
           await runGenerate();
         } else {
           await runElevate();
         }
       } catch (err) {
         setResult(null);
-        setError(err instanceof Error ? err.message : "Something went wrong");
+        setError(describeStudioError(err));
       }
     });
   }
@@ -316,32 +353,39 @@ export function Studio() {
             Atelier
           </p>
           <h2 className="mt-1 font-[family-name:var(--font-display)] text-3xl text-[var(--cream)]">
-            Recipe Studio
+            {RESEARCH_STUDIO ? "Recipe Studio" : "Elevate"}
           </h2>
         </div>
-        <div className="flex gap-2" role="tablist" aria-label="Studio mode">
-          {(
-            [
-              { id: "generate", label: "Generate" },
-              { id: "elevate", label: "Elevate" },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={mode === tab.id}
-              onClick={() => setMode(tab.id)}
-              className={`px-4 py-2 text-xs uppercase tracking-[0.16em] transition ${
-                mode === tab.id
-                  ? "border-b border-[var(--gold)] text-[var(--gold)]"
-                  : "text-[var(--muted)] hover:text-[var(--cream-dim)]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {(RESEARCH_STUDIO || logout) && (
+          <div className="flex flex-wrap items-end gap-4">
+            {RESEARCH_STUDIO && (
+              <div className="flex gap-2" role="tablist" aria-label="Studio mode">
+                {(
+                  [
+                    { id: "generate", label: "Generate" },
+                    { id: "elevate", label: "Elevate" },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === tab.id}
+                    onClick={() => setMode(tab.id)}
+                    className={`px-4 py-2 text-xs uppercase tracking-[0.16em] transition ${
+                      mode === tab.id
+                        ? "border-b border-[var(--gold)] text-[var(--gold)]"
+                        : "text-[var(--muted)] hover:text-[var(--cream-dim)]"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {logout}
+          </div>
+        )}
       </div>
 
       <form onSubmit={onSubmit} className="space-y-8">
@@ -382,7 +426,7 @@ export function Studio() {
             })}
           </div>
 
-          {RESTRICTED_STRATEGY && (
+          {RESEARCH_STUDIO && RESTRICTED_STRATEGY && (
             <div className="mt-2">
               <button
                 type="button"
@@ -470,6 +514,7 @@ export function Studio() {
             after work, not after a trip to a health shop. Batch is the same
             shop, cooked once for the days you will not cook.
           </p>
+          {RESEARCH_STUDIO && (
           <div className="grid gap-2 sm:grid-cols-2">
             <button
               type="button"
@@ -516,7 +561,8 @@ export function Studio() {
               </span>
             </button>
           </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          )}
+          <div className={`grid gap-2 ${RESEARCH_STUDIO ? "mt-2 sm:grid-cols-3" : "mt-2 sm:grid-cols-2"}`}>
             <button
               type="button"
               role="radio"
@@ -561,6 +607,7 @@ export function Studio() {
                 Cook once, 3–4 portions that reheat.
               </span>
             </button>
+            {RESEARCH_STUDIO && (
             <button
               type="button"
               role="radio"
@@ -583,9 +630,11 @@ export function Studio() {
                 A longer method is allowed.
               </span>
             </button>
+            )}
           </div>
         </div>
 
+        {RESEARCH_STUDIO && (
         <div>
           <FieldLabel>Local model</FieldLabel>
           <div
@@ -623,8 +672,9 @@ export function Studio() {
             })}
           </div>
         </div>
+        )}
 
-        {mode === "generate" ? (
+        {mode === "generate" && RESEARCH_STUDIO ? (
           <div className="space-y-6">
             <p className="max-w-xl text-sm text-[var(--cream-dim)]">
               Set macros, pantry, and tools — the chef-scientist composes a
@@ -730,20 +780,33 @@ export function Studio() {
         ) : (
           <div className="space-y-6">
             <p className="max-w-xl text-sm text-[var(--cream-dim)]">
-              Name a high-calorie craving. We reconstruct it with molecular
-              substitution — same emotional reward, leaner physics.
+              {RESEARCH_STUDIO
+                ? "Name a high-calorie craving. We reconstruct it with molecular substitution — same emotional reward, leaner physics."
+                : "Name the client and the craving. Weeknight, supermarket, ~480 kcal / 40 g protein. Pasta, bun, or lemon-chicken first — pizza and tacos will miss."}
             </p>
 
-            <div>
-              <FieldLabel>Craving meal</FieldLabel>
-              <input
-                className={inputClass}
-                type="text"
-                value={craving}
-                onChange={(e) => setCraving(e.target.value)}
-                placeholder="Cheeseburger, Fettuccine Alfredo…"
-                required
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <FieldLabel>For (client)</FieldLabel>
+                <input
+                  className={inputClass}
+                  type="text"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                  placeholder="Maya"
+                />
+              </div>
+              <div>
+                <FieldLabel>Craving meal</FieldLabel>
+                <input
+                  className={inputClass}
+                  type="text"
+                  value={craving}
+                  onChange={(e) => setCraving(e.target.value)}
+                  placeholder="Cheeseburger, Fettuccine Alfredo…"
+                  required
+                />
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
@@ -808,8 +871,9 @@ export function Studio() {
           </button>
           {isPending && (
             <p className="text-sm text-[var(--muted)]">
-              {selectedModel?.label ?? modelId} is plating — first load of 32B
-              may take 1–2 minutes.
+              {RESEARCH_STUDIO
+                ? `${selectedModel?.label ?? modelId} is plating — first load of 32B may take 1–2 minutes.`
+                : "Composing a plate — usually under a minute."}
             </p>
           )}
         </div>
@@ -823,7 +887,8 @@ export function Studio() {
           {error}
           {(error.includes("ECONNREFUSED") ||
             error.includes("fetch failed") ||
-            error.toLowerCase().includes("ollama")) && (
+            error.toLowerCase().includes("ollama")) &&
+            RESEARCH_STUDIO && (
             <p className="mt-2 text-xs text-red-300/80">
               Is Ollama running? Try{" "}
               <code className="text-red-100">ollama serve</code> in another

@@ -28,6 +28,31 @@ export interface GraphConstraintsResult {
   lookup: GraphLookupResult;
 }
 
+function cookFacts(node: MatchedIngredient): string[] {
+  const facts: string[] = [];
+  const cook = node.handling?.starchCook;
+  if (cook === "reheat") {
+    facts.push("Starch cook: already cooked — warm it, never simmer as dry grain");
+  } else if (cook === "simmer") {
+    facts.push("Starch cook: simmer the dry grain until tender");
+  } else if (cook === "toast_assemble") {
+    facts.push("Starch cook: toast and assemble");
+  } else if (cook === "boil_reserve_toss") {
+    facts.push(
+      "Starch cook: boil until al dente, reserve pasta water, drain, toss off the heat"
+    );
+  }
+  const role = node.handling?.methodRole;
+  if (role === "fold_into_sauce") facts.push("Method: fold through the sauce");
+  else if (role === "slurry") facts.push("Method: stir through as a slurry until glossy");
+  else if (role === "assemble") facts.push("Method: add when assembling");
+  else if (role === "mix_in") facts.push("Method: mix into the meat before cooking");
+  else if (role === "sauce_join") facts.push("Method: stir into the sauce");
+  else if (role === "finish") facts.push("Method: finish off the heat");
+  else if (role === "combine_after_sear") facts.push("Method: sear, then fold through");
+  return facts;
+}
+
 function formatIngredientFact(node: MatchedIngredient): string {
   const m = node.macroPer100g;
   const parts = [
@@ -40,6 +65,7 @@ function formatIngredientFact(node: MatchedIngredient): string {
   if (node.flavorPairs.length > 0) {
     parts.push(`Pairs with: ${node.flavorPairs.join(", ")}`);
   }
+  parts.push(...cookFacts(node));
   return parts.join(" | ");
 }
 
@@ -124,7 +150,7 @@ export function buildKnowledgeGraphConstraints(params: {
     );
   } else {
     sections.push(
-      `### Supermarket kitchen — do not use\n${specialty.map((name) => `- ${name}`).join("\n")}\n\nIf the user listed one of these in available ingredients, that single item is allowed. Do not add any other specialty item. Fat-mimicry still required — yogurt, blender, sear, reduction, lemon, mustard.`
+      `### Supermarket kitchen — do not use\n${specialty.map((name) => `- ${name}`).join("\n")}\n\nIf the user listed one of these in available ingredients, that single item is allowed. Do not add any other specialty item. Fat-mimicry still required — yogurt only as a cream/mayo/burger binder; chili gloss is slurry, reduction, sear, sesame oil, lemon, mustard.`
     );
   }
 

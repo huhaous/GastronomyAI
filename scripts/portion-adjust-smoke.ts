@@ -4,7 +4,7 @@ import {
   rebalanceProteinForStrategy,
   rewriteQuantitiesInText,
 } from "../src/lib/ai/portionAdjust";
-import { ensureCarbonaraEmulsion } from "../src/lib/cook/carbonaraEmulsion";
+import { applySignaturePlate } from "../src/lib/cook/signaturePlate";
 import { findIngredientNode } from "../src/data/knowledgeGraph";
 import { resolveFoodLine, resolveFoodLines } from "../src/lib/nutrition/foodLines";
 import { classifyGroup } from "../src/lib/nutrition/portionScaling";
@@ -210,6 +210,10 @@ if (rebalancedChicken < 150) {
 if (rebalancedYogurt !== 80) {
   throw new Error(`rebalance dumped yogurt to ${rebalancedYogurt}g`);
 }
+const rebalancedKcal = resolveFoodLines(rebalanced.ingredients).macros.calories;
+if (rebalancedKcal > 480) {
+  throw new Error(`pasta rebalance blew the cap: ${rebalancedKcal} kcal vs 480`);
+}
 
 const dairyOnly = {
   ...base,
@@ -376,13 +380,14 @@ const carbonaraOver = {
     { name: "spaghetti", quantity: "100", unit: "g" },
     { name: "chicken breast (lean)", quantity: "250", unit: "g" },
     { name: "Greek yogurt", quantity: "120", unit: "ml" },
+    { name: "Egg yolk", quantity: "17", unit: "g", notes: "1 yolk" },
     { name: "spinach", quantity: "50", unit: "g" },
     { name: "mustard (Dijon or whole grain)", quantity: "1", unit: "ml" },
     { name: "mystery finishing salt", quantity: "1", unit: "g" },
   ],
 } as ElevatedRecipe;
 
-const emulsified = ensureCarbonaraEmulsion(carbonaraOver, {
+const emulsified = applySignaturePlate(carbonaraOver, {
   craving: "carbonara",
   targetCalories: 480,
 });
@@ -398,7 +403,7 @@ if (!capAdj) {
   throw new Error("carbonara overshoot must scale; scaler froze");
 }
 const cappedKcal = resolveFoodLines(capped.ingredients).macros.calories;
-if (cappedKcal > 480 * 1.05) {
+if (cappedKcal > 480) {
   throw new Error(`calorie hard cap missed: ${cappedKcal} kcal vs 480`);
 }
 const cappedProtein = resolveFoodLines(capped.ingredients).macros.protein_g;
@@ -410,6 +415,163 @@ const cappedChicken = Number(
 );
 if (cappedChicken >= 250) {
   throw new Error(`surplus chicken was locked at ${cappedChicken}g`);
+}
+
+const jasmine = findIngredientNode("cooked jasmine rice");
+if (jasmine?.handling?.starchCook !== "reheat") {
+  throw new Error(
+    `cooked jasmine rice priced as ${jasmine?.name ?? "none"} (${jasmine?.handling?.starchCook ?? "no cook"})`
+  );
+}
+if (findIngredientNode("dill pickles")?.key !== "pickle") {
+  throw new Error("dill pickles must match the pickle node");
+}
+
+const glossyBurger = {
+  ...base,
+  name: "Post-Workout Glossy Cheeseburger",
+  original_craving: "cheese burger",
+  nutritional_strategy: "post_workout_high_protein" as const,
+  macros: { calories: 460, protein_g: 48, carbs_g: 32, fat_g: 16 },
+  ingredients: [
+    { name: "extra-lean ground beef, 95% lean", quantity: "150", unit: "g" },
+    { name: "liquid egg whites", quantity: "60", unit: "ml" },
+    { name: "white hamburger bun", quantity: "55", unit: "g" },
+    { name: "reduced-fat cheddar", quantity: "14", unit: "g" },
+    { name: "0% Greek yogurt", quantity: "30", unit: "g" },
+    { name: "ketchup", quantity: "10", unit: "g" },
+    { name: "yellow mustard", quantity: "8", unit: "g" },
+    { name: "dill pickles", quantity: "25", unit: "g" },
+    { name: "lettuce", quantity: "20", unit: "g" },
+    { name: "red onion", quantity: "15", unit: "g" },
+  ],
+} as ElevatedRecipe;
+const { recipe: burgerScaled } = adjustPortions(
+  glossyBurger,
+  { calories: 480, protein_g: 40 },
+  { strategy: "post_workout_high_protein" }
+);
+const burgerDone = rebalanceProteinForStrategy(
+  burgerScaled,
+  { calories: 480, protein_g: 40 },
+  "post_workout_high_protein"
+);
+const burgerPriced = resolveFoodLines(burgerDone.ingredients);
+if (Math.round(burgerPriced.macros.calories) > 480) {
+  throw new Error(`burger blew the cap: ${burgerPriced.macros.calories} kcal vs 480`);
+}
+const burgerFatPct =
+  (burgerPriced.macros.fat_g * 9) / burgerPriced.macros.calories * 100;
+if (burgerFatPct > 30) {
+  throw new Error(`burger fat ${burgerFatPct.toFixed(1)}% over the 30% ceiling`);
+}
+const burgerBun = Number(
+  burgerDone.ingredients.find((line) => /bun/i.test(line.name))?.quantity
+);
+if (burgerBun > 70) {
+  throw new Error(`burger bun became ${burgerBun}g instead of one bun`);
+}
+if (!burgerDone.ingredients.some((line) => /pickle/i.test(line.name))) {
+  throw new Error("pickle was dropped as volume instead of assembled");
+}
+const burgerBeef = Number(
+  burgerDone.ingredients.find((line) => /beef/i.test(line.name))?.quantity
+);
+if (burgerBeef < 150) {
+  throw new Error(`patty was cut to ${burgerBeef}g to chase calories`);
+}
+
+const mapoYogurt = {
+  ...base,
+  name: "Mapo Tofu Rice Bowl",
+  original_craving: "mapo tofu",
+  nutritional_strategy: "post_workout_high_protein" as const,
+  ingredients: [
+    { name: "99% lean ground turkey", quantity: "140", unit: "g" },
+    { name: "firm tofu", quantity: "100", unit: "g" },
+    { name: "cooked jasmine rice", quantity: "100", unit: "g" },
+    { name: "0% Greek yogurt", quantity: "40", unit: "g" },
+    { name: "doubanjiang chili bean paste", quantity: "18", unit: "g" },
+    { name: "cornstarch", quantity: "3", unit: "g" },
+    { name: "toasted sesame oil", quantity: "2", unit: "ml" },
+    { name: "unsalted chicken stock", quantity: "80", unit: "ml" },
+  ],
+} as ElevatedRecipe;
+
+const mapoSigned = applySignaturePlate(mapoYogurt, { craving: "mapo tofu" });
+if (mapoSigned.ingredients.some((line) => /yogurt/i.test(line.name))) {
+  throw new Error("mapo slurry plate kept Greek yogurt");
+}
+
+const { recipe: mapoScaled } = adjustPortions(
+  mapoSigned,
+  { calories: 480, protein_g: 40 },
+  { strategy: "post_workout_high_protein" }
+);
+const mapoDone = rebalanceProteinForStrategy(
+  mapoScaled,
+  { calories: 480, protein_g: 40 },
+  "post_workout_high_protein"
+);
+const mapoKcal = resolveFoodLines(mapoDone.ingredients).macros.calories;
+if (mapoKcal > 480) {
+  throw new Error(`mapo calorie cap missed: ${mapoKcal} kcal vs 480`);
+}
+
+const underThenShare = {
+  ...base,
+  name: "Mapo under then share",
+  original_craving: "mapo tofu",
+  nutritional_strategy: "post_workout_high_protein" as const,
+  ingredients: [
+    { name: "raw ground chicken breast", quantity: "150", unit: "g" },
+    { name: "soft tofu", quantity: "100", unit: "g" },
+    { name: "cooked jasmine rice", quantity: "100", unit: "g" },
+    { name: "low-sodium chicken broth", quantity: "100", unit: "ml" },
+    { name: "cornstarch", quantity: "5", unit: "g" },
+    { name: "toasted sesame oil", quantity: "2", unit: "ml" },
+  ],
+} as ElevatedRecipe;
+const underPriced = resolveFoodLines(underThenShare.ingredients);
+if (underPriced.macros.calories > 480) {
+  throw new Error(`under-then-share fixture already over: ${underPriced.macros.calories}`);
+}
+const { recipe: underScaled } = adjustPortions(
+  underThenShare,
+  { calories: 480, protein_g: 40 },
+  { strategy: "post_workout_high_protein" }
+);
+const underDone = rebalanceProteinForStrategy(
+  underScaled,
+  { calories: 480, protein_g: 40 },
+  "post_workout_high_protein"
+);
+const underKcal = resolveFoodLines(underDone.ingredients).macros.calories;
+if (underKcal > 480) {
+  throw new Error(`share chase blew the cap: ${underKcal} kcal vs 480`);
+}
+const underChicken = Number(
+  underDone.ingredients.find((line) => /chicken/i.test(line.name))?.quantity
+);
+if (underChicken > 150) {
+  throw new Error(`share chase grew chicken to ${underChicken}g after grams were met`);
+}
+
+const tikkaDairy = applySignaturePlate(
+  {
+    ...base,
+    name: "Chicken tikka",
+    original_craving: "chicken tikka masala",
+    ingredients: [
+      { name: "Chicken breast", quantity: "160", unit: "g" },
+      { name: "0% Greek yogurt", quantity: "40", unit: "g" },
+      { name: "tomato", quantity: "80", unit: "g" },
+    ],
+  } as ElevatedRecipe,
+  { craving: "chicken tikka masala" }
+);
+if (!tikkaDairy.ingredients.some((line) => /yogurt/i.test(line.name))) {
+  throw new Error("tikka lost the yogurt sauce");
 }
 
 console.log(adjustment.changes.join("; "));

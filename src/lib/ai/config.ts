@@ -1,4 +1,4 @@
-import { DEFAULT_LOCAL_MODEL } from "@/lib/ai/models";
+import { DEFAULT_LOCAL_MODEL, LOCAL_MODEL_IDS } from "@/lib/ai/models";
 
 /**
  * LLM provider config for GastronomyAI.
@@ -20,8 +20,29 @@ export interface LlmConfig {
   useStrictJsonSchema: boolean;
 }
 
+function isLocalModelId(id: string): boolean {
+  return (LOCAL_MODEL_IDS as readonly string[]).includes(id);
+}
+
+/**
+ * Drop a model id that belongs to the other provider. Studio used to send
+ * Qwen names on every Elevate; those must not reach OpenAI, and a gpt-* name
+ * must not reach Ollama.
+ */
+function modelForProvider(
+  provider: LlmProvider,
+  override?: string
+): string | undefined {
+  if (!override) return undefined;
+  const local = isLocalModelId(override);
+  if (provider === "openai" && local) return undefined;
+  if (provider === "local" && !local) return undefined;
+  return override;
+}
+
 export function getLlmConfig(modelOverride?: string): LlmConfig {
   const provider = (process.env.LLM_PROVIDER ?? "local").toLowerCase() as LlmProvider;
+  const override = modelForProvider(provider, modelOverride);
 
   if (provider === "openai") {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -34,7 +55,7 @@ export function getLlmConfig(modelOverride?: string): LlmConfig {
       provider: "openai",
       baseUrl: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
       apiKey,
-      model: modelOverride || process.env.OPENAI_MODEL || "gpt-4o",
+      model: override || process.env.OPENAI_MODEL || "gpt-4o",
       useStrictJsonSchema: true,
     };
   }
@@ -45,7 +66,7 @@ export function getLlmConfig(modelOverride?: string): LlmConfig {
     provider: "local",
     baseUrl: process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434/v1",
     apiKey: process.env.OLLAMA_API_KEY ?? "ollama",
-    model: modelOverride || process.env.OLLAMA_MODEL || DEFAULT_LOCAL_MODEL,
+    model: override || process.env.OLLAMA_MODEL || DEFAULT_LOCAL_MODEL,
     useStrictJsonSchema: process.env.OLLAMA_STRICT_JSON_SCHEMA === "true",
   };
 }

@@ -18,6 +18,7 @@ import {
 import {
   classifyGroup,
   fatCeilingFor,
+  fatGramCeiling,
   isLeanMuscle,
   isSauceProtein,
   solveScaling,
@@ -110,13 +111,27 @@ function roundAmount(value: number, unit: string): number {
 }
 
 /** Buns and leaves snap to whole pieces; never scale a bun below one. */
-function snapToPiece(grams: number, name: string, unit: string): number {
+function snapToPiece(
+  grams: number,
+  name: string,
+  unit: string,
+  original?: number
+): number {
   if (!isWeightUnit(unit)) return grams;
   const node = findIngredientNode(name);
   if (!node?.handling?.countAsPiece) return grams;
   const piece = node.gramsPer?.piece;
   if (!piece) return grams;
-  return Math.max(1, Math.round(grams / piece)) * piece;
+  const start = original ?? grams;
+  const startPieces = Math.max(1, Math.round(start / piece));
+  const nextPieces = Math.max(1, Math.round(grams / piece));
+  // Piece-grid lines (1 bun = 70g) stay on the grid. A 55g weigh-in is one
+  // smaller bun — do not snap it up to 70g and blow the calorie cap.
+  if (Math.abs(start - startPieces * piece) <= 1) {
+    return nextPieces * piece;
+  }
+  if (nextPieces === startPieces) return start;
+  return nextPieces * piece;
 }
 
 function formatAmount(value: number): string {
@@ -329,8 +344,17 @@ export function adjustPortions<T extends GourmetRecipe>(
   recipe = repairPieceQuantities(recipe);
 
   const servings = Math.max(1, recipe.servings || 1);
-  const { lines, unresolved } = resolveFoodLines(recipe.ingredients);
-  if (unresolved.some((line) => !isTinyUnresolved(line))) return { recipe };
+  const { lines, unresolved, macros: pricedMacros } = resolveFoodLines(
+    recipe.ingredients
+  );
+  // Unknown food freezes a scale-up — we cannot invent the missing energy.
+  // A verified floor already over the typed number can still be cut.
+  if (
+    unresolved.some((line) => !isTinyUnresolved(line)) &&
+    pricedMacros.calories <= target.calories * servings
+  ) {
+    return { recipe };
+  }
 
   const base: MacroProfile = { ...EMPTY };
   const groups: Partial<Record<ScaleGroup, MacroProfile>> = {};
@@ -383,7 +407,26 @@ export function adjustPortions<T extends GourmetRecipe>(
     before.protein_g < totalTarget.protein_g * 0.98;
   const drift =
     (Math.abs(before.calories - totalTarget.calories!) / totalTarget.calories!) * 100;
-  if (drift <= CALORIE_TOLERANCE_PERCENT && !proteinShort) return { recipe };
+  const overTarget = before.calories > totalTarget.calories!;
+  const strategyFatCap = fatGramCeiling(
+    totalTarget.calories!,
+    options?.strategy
+      ? FAT_LOSS_RULES[options.strategy].enforcedBounds.fatMaxPercent
+      : undefined
+  );
+  if (totalTarget.fat_g == null && strategyFatCap != null) {
+    totalTarget.fat_g = strategyFatCap;
+  }
+  const fatOver =
+    totalTarget.fat_g != null && before.fat_g > totalTarget.fat_g;
+  if (
+    !overTarget &&
+    !fatOver &&
+    drift <= CALORIE_TOLERANCE_PERCENT &&
+    !proteinShort
+  ) {
+    return { recipe };
+  }
 
   const fatMax = fatCeilingFor(groups.fat?.fat_g ?? 0, totalTarget.fat_g);
   const gramsMet =
@@ -395,21 +438,26 @@ export function adjustPortions<T extends GourmetRecipe>(
     shareAim == null || proteinSharePercent(before) >= shareAim;
   const proteinMet = gramsMet && shareMet;
   const highProtein = isHighProteinStrategy(options?.strategy);
-  const overshoot =
-    totalTarget.calories != null &&
-    before.calories > totalTarget.calories * (1 + CALORIE_TOLERANCE_PERCENT / 100);
+  const overshoot = overTarget;
   const proteinFloor = totalTarget.protein_g ?? 0;
   const proteinFloorRatio =
     proteinFloor > 0 && before.protein_g > 0
       ? Math.max(0.5, Math.min(1, proteinFloor / before.protein_g))
       : 0.5;
+  const calorieGap = Math.max(0, before.calories - (totalTarget.calories ?? 0));
+  const fatCanCloseGap =
+    gramsMet && (groups.fat?.calories ?? 0) * 0.8 >= calorieGap;
 
   const bounds: Partial<Record<ScaleGroup, { min?: number; max?: number }>> = {
     ...(fatMax ? { fat: { max: fatMax } } : {}),
     // Surplus chicken on an over-target plate must be allowed to shrink.
     // Locking protein at 1× is how 250g breast + 100g pasta stays at 755.
+    // A 4% burger overshoot is cheese, not the patty.
     ...(highProtein && !overshoot ? { protein: { min: 1 } } : {}),
-    ...(overshoot ? { protein: { min: proteinFloorRatio } } : {}),
+    ...(overshoot && fatCanCloseGap ? { protein: { min: 1, max: 1 } } : {}),
+    ...(overshoot && !fatCanCloseGap
+      ? { protein: { min: proteinFloorRatio } }
+      : {}),
     // Protein already on target: extra chicken/yogurt is not how you close
     // an energy hole. Leave that for a starch the cook will actually eat.
     ...(proteinMet && !overshoot
@@ -424,30 +472,15 @@ export function adjustPortions<T extends GourmetRecipe>(
     ...(overshoot && gramsMet ? { protein_g: undefined } : {}),
   };
 
-  let { factors, clamped } = solveScaling({
+  const { factors, clamped } = solveScaling({
     base,
     groups,
     target: solverTarget,
     bounds,
+    fatMaxPercent: options?.strategy
+      ? FAT_LOSS_RULES[options.strategy].enforcedBounds.fatMaxPercent
+      : undefined,
   });
-  const predicted = Object.keys(groups).reduce(
-    (sum, group) => sum + (groups[group as ScaleGroup]!.calories * (factors[group as ScaleGroup] ?? 1)),
-    base.calories
-  );
-  if (totalTarget.calories && predicted > totalTarget.calories * (1 + CALORIE_TOLERANCE_PERCENT / 100)) {
-    const retry = solveScaling({
-      base,
-      groups,
-      target: solverTarget,
-      bounds: {
-        ...bounds,
-        protein: { min: 0.5, max: bounds.protein?.max ?? 2.5 },
-        carb: { min: 0.25, max: 1 },
-      },
-    });
-    factors = retry.factors;
-    clamped = retry.clamped;
-  }
 
   const changes: string[] = [];
   const replacements: QuantityRewrite[] = [];
@@ -462,14 +495,14 @@ export function adjustPortions<T extends GourmetRecipe>(
     if (amount == null) return item;
 
     const unit = resolveUnitToken(item);
-    let scaled = snapToPiece(roundAmount(amount * factor, unit), item.name, unit);
+    let scaled = snapToPiece(roundAmount(amount * factor, unit), item.name, unit, amount);
     const per100g = lines[index]?.per100g;
     if (per100g && isWeightUnit(unit) && factor > 1) {
       const cap = gramCapPerServing(group, per100g, item.name) * servings;
       if (amount >= cap) {
         scaled = amount;
       } else if (scaled > cap) {
-        scaled = snapToPiece(roundAmount(cap, unit), item.name, unit);
+        scaled = snapToPiece(roundAmount(cap, unit), item.name, unit, amount);
         gramCapped = true;
       }
     }
@@ -498,22 +531,103 @@ export function adjustPortions<T extends GourmetRecipe>(
   };
 
   const scaledList: T = { ...recipe, ingredients };
-
-  return {
-    recipe: {
+  const capped = shrinkToCalorieCap(
+    {
       ...rewriteNarration(scaledList, replacements),
       portion_adjustment: adjustment,
     },
-    adjustment,
+    target
+  );
+
+  return {
+    recipe: capped,
+    adjustment: capped.portion_adjustment ?? adjustment,
   };
 }
 
 /**
- * Gap-fill can dump a starch onto a plate whose protein grams already "met"
- * the request (40g). Post-workout then looks like 42g protein vs 64g carbs.
- * Raise lean meat only — never the yogurt sauce, never by cutting pasta.
- * If dairy is the only protein, the floor injects chicken rather than a tub
- * of yogurt.
+ * The calorie number the diner typed is the ceiling. Carb and fat give way
+ * after lean meat is set — this is the same constraint as solveScaling, not
+ * a 5% fudge after the protein-share pass.
+ */
+function shrinkToCalorieCap<T extends GourmetRecipe>(
+  recipe: T,
+  target?: Partial<MacroProfile>
+): T {
+  if (!target?.calories || target.calories <= 0) return recipe;
+  const servings = Math.max(1, recipe.servings || 1);
+  const priced = resolveFoodLines(recipe.ingredients);
+  const cap = target.calories * servings;
+  const over = priced.macros.calories - cap;
+  if (Math.round(priced.macros.calories / servings) <= target.calories) {
+    return recipe;
+  }
+
+  const shrinkAt: number[] = [];
+  for (const group of ["carb", "fat"] as ScaleGroup[]) {
+    priced.lines.forEach((line, index) => {
+      if (line.status !== "verified" || !line.per100g || !line.macros) return;
+      if (line.aromatic || line.unitKind === "count") return;
+      if (isSauceProtein(line.per100g) || isEmulsionBallast(line.name)) return;
+      if (findIngredientNode(line.name)?.handling?.countAsPiece) return;
+      if (classifyGroup(line.per100g) !== group) return;
+      if (line.macros.calories < MIN_SCALABLE_KCAL) return;
+      shrinkAt.push(index);
+    });
+  }
+  if (shrinkAt.length === 0) return recipe;
+
+  const potKcal = shrinkAt.reduce(
+    (sum, index) => sum + (priced.lines[index]?.macros?.calories ?? 0),
+    0
+  );
+  if (potKcal <= 0) return recipe;
+  const factor = Math.max(0.25, (potKcal - over) / potKcal);
+  if (factor >= 0.99) return recipe;
+
+  const changes: string[] = [];
+  const replacements: QuantityRewrite[] = [];
+  const ingredients = recipe.ingredients.map((item, index) => {
+    if (!shrinkAt.includes(index)) return item;
+    const amount = parseAmount(item.quantity);
+    if (amount == null) return item;
+    const unit = resolveUnitToken(item);
+    if (!isWeightUnit(unit)) return item;
+    const scaled = roundAmount(amount * factor, unit);
+    if (scaled === amount) return item;
+    changes.push(
+      `${item.name} ${formatAmount(amount)}${unit} → ${formatAmount(scaled)}${unit}`
+    );
+    replacements.push({
+      from: formatAmount(amount),
+      to: formatAmount(scaled),
+      unit,
+      name: item.name,
+    });
+    return { ...item, quantity: formatAmount(scaled), unit };
+  });
+  if (changes.length === 0) return recipe;
+
+  const nextPriced = resolveFoodLines(ingredients);
+  const prior = recipe.portion_adjustment;
+  const adjustment: PortionAdjustment = {
+    target_calories: Math.round(target.calories),
+    before_calories: prior?.before_calories ?? Math.round(priced.macros.calories / servings),
+    after_calories: Math.round(nextPriced.macros.calories / servings),
+    factors: prior?.factors ?? [],
+    changes: [...(prior?.changes ?? []), ...changes],
+    bounded: true,
+  };
+  return {
+    ...rewriteNarration({ ...recipe, ingredients }, replacements),
+    portion_adjustment: adjustment,
+  };
+}
+
+/**
+ * Gram floor and a carb-heavy plate raise lean meat. Share of calories does
+ * not grow meat on a plate that already hit the gram floor. After a necessary
+ * meat add, carb and fat give way so the typed calorie number stays the ceiling.
  */
 export function rebalanceProteinForStrategy<T extends GourmetRecipe>(
   recipe: T,
@@ -526,7 +640,12 @@ export function rebalanceProteinForStrategy<T extends GourmetRecipe>(
 
   const servings = Math.max(1, recipe.servings || 1);
   const priced = resolveFoodLines(recipe.ingredients);
-  if (priced.unresolved.some((line) => !isTinyUnresolved(line))) return recipe;
+  if (
+    priced.unresolved.some((line) => !isTinyUnresolved(line)) &&
+    !(target?.calories && priced.macros.calories > target.calories * servings)
+  ) {
+    return recipe;
+  }
 
   const perServing: MacroProfile = {
     calories: priced.macros.calories / servings,
@@ -539,8 +658,9 @@ export function rebalanceProteinForStrategy<T extends GourmetRecipe>(
   const carbHeavy =
     strategy === "post_workout_high_protein" &&
     perServing.protein_g < perServing.carbs_g * 0.8;
-  const shareOk = aim == null || proteinSharePercent(perServing) >= aim;
-  if (gramsOk && shareOk && !carbHeavy) return recipe;
+  if (gramsOk && !carbHeavy) {
+    return shrinkToCalorieCap(recipe, target);
+  }
 
   const meatAt: number[] = [];
   priced.lines.forEach((line, index) => {
@@ -550,7 +670,9 @@ export function rebalanceProteinForStrategy<T extends GourmetRecipe>(
     meatAt.push(index);
   });
   if (meatAt.length === 0) {
-    return gramsOk ? recipe : injectLeanProtein(recipe, target, perServing, servings);
+    return gramsOk
+      ? shrinkToCalorieCap(recipe, target)
+      : injectLeanProtein(recipe, target, perServing, servings);
   }
 
   const sample = priced.lines[meatAt[0]]!.per100g!;
@@ -572,16 +694,7 @@ export function rebalanceProteinForStrategy<T extends GourmetRecipe>(
     ? ((perServing.carbs_g * 0.8 - perServing.protein_g) * 100) / rp
     : 0;
   const extraPerServing = Math.max(extraForShare, extraForCarbs, extraForGrams);
-  if (extraPerServing < 8) return recipe;
-  // The scaler just cut surplus chicken to hit the cap. Do not grow it back
-  // for a prettier protein share on a plate that is already over energy.
-  if (
-    gramsOk &&
-    target?.calories &&
-    perServing.calories > target.calories * (1 + CALORIE_TOLERANCE_PERCENT / 100)
-  ) {
-    return recipe;
-  }
+  if (extraPerServing < 8) return shrinkToCalorieCap(recipe, target);
 
   const potMeat = meatAt.reduce((sum, i) => sum + (priced.lines[i]?.grams ?? 0), 0);
   if (potMeat <= 0) return recipe;
@@ -629,10 +742,13 @@ export function rebalanceProteinForStrategy<T extends GourmetRecipe>(
     bounded: prior?.bounded ?? false,
   };
 
-  return {
-    ...rewriteNarration({ ...recipe, ingredients }, replacements),
-    portion_adjustment: adjustment,
-  };
+  return shrinkToCalorieCap(
+    {
+      ...rewriteNarration({ ...recipe, ingredients }, replacements),
+      portion_adjustment: adjustment,
+    },
+    target
+  );
 }
 
 function injectLeanProtein<T extends GourmetRecipe>(
@@ -662,26 +778,29 @@ function injectLeanProtein<T extends GourmetRecipe>(
   const { recipe: filled, gramsInRecipe } = applyGapFill(recipe, suggestion);
   const cookLabel = node.cookName ?? "Chicken";
   const prior = filled.portion_adjustment ?? recipe.portion_adjustment;
-  return {
-    ...filled,
-    gap_fill_applied: recipe.gap_fill_applied ?? {
-      ...suggestion,
-      ingredient: cookLabel,
-      grams_in_recipe: gramsInRecipe,
-      servings,
+  return shrinkToCalorieCap(
+    {
+      ...filled,
+      gap_fill_applied: recipe.gap_fill_applied ?? {
+        ...suggestion,
+        ingredient: cookLabel,
+        grams_in_recipe: gramsInRecipe,
+        servings,
+      },
+      portion_adjustment: {
+        target_calories: Math.round(target?.calories ?? perServing.calories),
+        before_calories: prior?.before_calories ?? Math.round(perServing.calories),
+        after_calories: Math.round(
+          resolveFoodLines(filled.ingredients).macros.calories / servings
+        ),
+        factors: prior?.factors ?? [],
+        changes: [
+          ...(prior?.changes ?? []),
+          `This plate includes ${gramsInRecipe}g ${cookLabel} so protein meets ${floor}g`,
+        ],
+        bounded: prior?.bounded ?? false,
+      },
     },
-    portion_adjustment: {
-      target_calories: Math.round(target?.calories ?? perServing.calories),
-      before_calories: prior?.before_calories ?? Math.round(perServing.calories),
-      after_calories: Math.round(
-        (resolveFoodLines(filled.ingredients).macros.calories) / servings
-      ),
-      factors: prior?.factors ?? [],
-      changes: [
-        ...(prior?.changes ?? []),
-        `This plate includes ${gramsInRecipe}g ${cookLabel} so protein meets ${floor}g`,
-      ],
-      bounded: prior?.bounded ?? false,
-    },
-  };
+    target
+  );
 }

@@ -37,6 +37,11 @@ import type {
 } from "@/types/nutrition";
 import type { CookEffort, GourmetRecipe, MethodAlternate, RecipeStep } from "@/types/recipe";
 import { repairCookMethod } from "@/lib/cook/methodIntegrity";
+import {
+  resolveMealIdentityFromText,
+  shouldDropVolumeLine,
+  starchCookFromText,
+} from "@/lib/cook/mealIdentity";
 
 /** Below this the miss is rounding, not a different meal. */
 const GAP_TOLERANCE = 0.1;
@@ -195,44 +200,24 @@ function plateCarbVehicle(plateNodes: IngredientNode[]): IngredientNode | undefi
 type StarchCook = NonNullable<NonNullable<IngredientNode["handling"]>["starchCook"]>;
 
 /**
- * The craving names the starch cook. Zucchini→pasta is an Alfredo repair, not a
- * global calorie closer — a burger that used zucchini as a bun stays a burger.
+ * The craving names the starch cook via graph foods, not a dish-name list.
+ * Zucchini→pasta is an Alfredo repair only when the craving is actually pasta.
  */
 export function mealStarchCook(
   craving?: string,
   dishName?: string
 ): StarchCook | undefined {
-  const c = normalize(`${craving ?? ""} ${dishName ?? ""}`);
-  if (!c) return undefined;
-  if (
-    c.includes("burger") ||
-    c.includes("cheeseburger") ||
-    c.includes("hamburger") ||
-    c.includes("slider") ||
-    /\bsandwich\b/.test(c)
-  ) {
-    return "toast_assemble";
-  }
-  if (
-    c.includes("pasta") ||
-    c.includes("fettuccine") ||
-    c.includes("alfredo") ||
-    c.includes("spaghetti") ||
-    c.includes("carbonara") ||
-    c.includes("lasagna") ||
-    c.includes("noodle") ||
-    c.includes("macaroni")
-  ) {
-    return "boil_reserve_toss";
-  }
-  if (
-    c.includes("fried rice") ||
-    c.includes("risotto") ||
-    (c.includes("rice") && !c.includes("cauliflower"))
-  ) {
-    return "simmer";
-  }
-  return undefined;
+  return starchCookFromText(`${craving ?? ""} ${dishName ?? ""}`);
+}
+
+function offIdentityVolume(
+  node: IngredientNode,
+  craving?: string,
+  dish?: string
+): boolean {
+  const asked = `${craving ?? ""} ${dish ?? ""}`;
+  const identity = resolveMealIdentityFromText(asked);
+  return shouldDropVolumeLine(node, asked, identity);
 }
 
 function starchCookAllowed(
@@ -270,34 +255,24 @@ function cravingBoost(
   ) {
     return -20;
   }
-  const pastaCraving =
-    c.includes("pasta") ||
-    c.includes("fettuccine") ||
-    c.includes("alfredo") ||
-    c.includes("spaghetti") ||
-    c.includes("carbonara") ||
-    c.includes("lasagna") ||
-    c.includes("noodle");
-  const burgerCraving =
-    c.includes("burger") || c.includes("cheeseburger") || c.includes("hamburger");
+  const wanted = mealStarchCook(craving);
   const name = normalize(node.name);
   const aliases = (node.aliases ?? []).map(normalize);
   if (
-    pastaCraving &&
-    vehicle?.handling?.starchCook !== "toast_assemble" &&
-    (name.includes("pasta") ||
-      aliases.some((a) => a.includes("pasta") || a === "spaghetti" || a === "penne"))
+    wanted &&
+    node.handling?.starchCook === wanted &&
+    isCarbVehicle(node) &&
+    vehicle?.handling?.starchCook !== "toast_assemble"
   ) {
     return 10;
   }
   if (
-    burgerCraving &&
+    wanted === "toast_assemble" &&
     (name.includes("bun") || aliases.some((a) => a.includes("bun")))
   ) {
     return 10;
   }
   if (c.includes("pizza") && name.includes("mozzarella")) return 6;
-  if (c.includes("rice") && name.includes("rice")) return 8;
   return 0;
 }
 
@@ -539,6 +514,7 @@ export function suggestGapFillers(input: GapFillInput): GapSuggestion[] {
       for (const node of candidates(input.allowSpecialty === true, input.effort)) {
         if (node.name === fromNode.name) continue;
         if (alreadyOnPlate(node, plateNames)) continue;
+        if (offIdentityVolume(node, input.craving, input.dish)) continue;
 
         const group = classifyGroup({
           calories: node.macroPer100g.calories,
@@ -603,6 +579,7 @@ export function suggestGapFillers(input: GapFillInput): GapSuggestion[] {
         fat_g: node.macroPer100g.fat_g,
       });
       if (group === "produce") continue;
+      if (offIdentityVolume(node, input.craving, input.dish)) continue;
       // More oil of what's already in the pan is the bound we just refused to
       // cross. More of the protein or starch is a different plate, not a greasy
       // version of the same one.
@@ -735,6 +712,9 @@ function cookInstruction(
   if (node?.handling?.starchCook === "simmer") {
     return `Simmer ${gramsInRecipe}g dry ${cookName} until tender, then drain.`;
   }
+  if (node?.handling?.starchCook === "reheat") {
+    return `Warm the ${cookName}.`;
+  }
   if (node?.handling?.starchCook === "toast_assemble") {
     return `Toast the ${cookName}.`;
   }
@@ -774,7 +754,7 @@ function isAssemblyOrServe(instruction: string): boolean {
 function needsEarlyCook(suggestion: GapSuggestion): boolean {
   const node = findIngredientNode(suggestion.ingredient);
   const cook = node?.handling?.starchCook;
-  return cook === "boil_reserve_toss" || cook === "simmer";
+  return cook === "boil_reserve_toss" || cook === "simmer" || cook === "reheat";
 }
 
 function injectCookStep(
@@ -793,7 +773,7 @@ function injectCookStep(
     const already =
       ordered.some(
         (step) =>
-          /\bboil\b/i.test(step.instruction) &&
+          /\b(boil|simmer|warm|toast)\b/i.test(step.instruction) &&
           new RegExp(escapeRe(cookDisplayName(suggestion.ingredient)), "i").test(
             step.instruction
           )
@@ -859,7 +839,7 @@ function rewriteStepsForSwap(
 ): RecipeStep[] {
   const node = findIngredientNode(suggestion.ingredient);
   const cook = node?.handling?.starchCook;
-  if (cook === "boil_reserve_toss" || cook === "toast_assemble") {
+  if (cook === "boil_reserve_toss" || cook === "toast_assemble" || cook === "reheat") {
     const cleaned = steps
       .filter((step) => !isPrimarilyVolumePrep(step.instruction))
       .map((step) => {

@@ -21,6 +21,8 @@ export interface SavedRecipeMeta {
   model?: string;
   /** User-supplied name for the plate; defaults to the dish name. */
   title?: string;
+  /** Who this plate is for — a client name, when a coach is using Studio. */
+  client?: string;
   /** Free-text note — who it's for, how it went. */
   note?: string;
 }

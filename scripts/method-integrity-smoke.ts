@@ -3,6 +3,7 @@
  * pungent alliums before cold dairy, and use any liquid it reserved.
  */
 import { ensureCarbonaraEmulsion } from "../src/lib/cook/carbonaraEmulsion";
+import { applySignaturePlate } from "../src/lib/cook/signaturePlate";
 import { repairCookMethod } from "../src/lib/cook/methodIntegrity";
 import { findIngredientNode } from "../src/data/knowledgeGraph";
 import type { GourmetRecipe } from "../src/types/recipe";
@@ -106,9 +107,13 @@ if (!/parmesan/i.test(method)) {
   process.exit(1);
 }
 
-const blend = repaired.steps.find((step) => /blend/i.test(step.instruction));
-if (!blend || /garlic/i.test(blend.instruction)) {
-  console.error("FAIL: raw garlic still in the cold blend:", blend?.instruction);
+const sauce = repaired.steps.find(
+  (step) =>
+    /yogurt|cottage/i.test(step.instruction) &&
+    /whisk|stir|blend/i.test(step.instruction)
+);
+if (!sauce || /garlic/i.test(sauce.instruction)) {
+  console.error("FAIL: raw garlic still in the cold sauce:", sauce?.instruction);
   process.exit(1);
 }
 const bloomed = repaired.steps.some(
@@ -239,10 +244,12 @@ if (!noodleSwap.steps.some((step) => /sear/i.test(step.instruction))) {
 }
 if (
   !noodleSwap.steps.some(
-    (step) => /blend/i.test(step.instruction) && /yogurt/i.test(step.instruction)
+    (step) =>
+      /yogurt/i.test(step.instruction) &&
+      /whisk|stir|blend/i.test(step.instruction)
   )
 ) {
-  console.error("FAIL: yogurt blend was dropped:\n", noodleText);
+  console.error("FAIL: yogurt sauce was dropped:\n", noodleText);
   process.exit(1);
 }
 
@@ -488,6 +495,7 @@ const carbonaraPlate = ensureCarbonaraEmulsion(
       { name: "spaghetti", quantity: "100", unit: "g" },
       { name: "chicken breast", quantity: "250", unit: "g" },
       { name: "Greek yogurt", quantity: "120", unit: "ml" },
+      { name: "Egg yolk", quantity: "17", unit: "g", notes: "1 yolk" },
       { name: "mustard", quantity: "1", unit: "ml" },
     ],
     steps: [
@@ -509,7 +517,22 @@ if (!carbonaraCooked.ingredients.some((line) => /egg|yolk/i.test(line.name))) {
   process.exit(1);
 }
 if (!/egg|yolk/i.test(carbonaraText)) {
-  console.error("FAIL: carbonara method never blends the egg:\n", carbonaraText);
+  console.error("FAIL: carbonara method never uses the egg:\n", carbonaraText);
+  process.exit(1);
+}
+if (/blend|blitz|processor/i.test(carbonaraText)) {
+  console.error("FAIL: carbonara called for a blender:\n", carbonaraText);
+  process.exit(1);
+}
+if (!/whisk/i.test(carbonaraText)) {
+  console.error("FAIL: carbonara should whisk in the pan:\n", carbonaraText);
+  process.exit(1);
+}
+if (carbonaraCooked.steps.length > 4) {
+  console.error(
+    `FAIL: weeknight carbonara has ${carbonaraCooked.steps.length} steps:\n`,
+    carbonaraText
+  );
   process.exit(1);
 }
 if (!/off the heat|residual heat/i.test(carbonaraText)) {
@@ -526,6 +549,207 @@ if (
   carbonaraAgain.steps.map((s) => s.instruction).join("\n") !== carbonaraText
 ) {
   console.error("FAIL: carbonara emulsion repair is not idempotent.");
+  process.exit(1);
+}
+
+const signed = applySignaturePlate(
+  {
+    ...base,
+    name: "Post-Workout Protein Carbonara",
+    original_craving: "carbonara",
+    tagline: "A lighter twist that mimics traditional carbonara without the guilt.",
+    psychological_reward_note:
+      "Enjoy carbonara without the guilt, thanks to a lighter yogurt emulsion.",
+    ingredients: [
+      { name: "spaghetti", quantity: "100", unit: "g" },
+      { name: "chicken breast", quantity: "250", unit: "g" },
+      { name: "Greek yogurt", quantity: "150", unit: "g" },
+      { name: "Egg yolk", quantity: "17", unit: "g", notes: "1 yolk" },
+      { name: "garlic", quantity: "15", unit: "g" },
+      { name: "spinach", quantity: "60", unit: "g" },
+      { name: "mustard", quantity: "8", unit: "g" },
+    ],
+    steps: [
+      { order: 1, instruction: "Boil pasta." },
+      { order: 2, instruction: "Sear chicken, wilt spinach, bloom garlic." },
+    ],
+  } as GourmetRecipe,
+  { craving: "carbonara", targetCalories: 480 }
+);
+const signedNames = signed.ingredients.map((line) => line.name.toLowerCase()).join(" ");
+if (/spinach/.test(signedNames)) {
+  console.error("FAIL: signature plate kept volume spinach:", signedNames);
+  process.exit(1);
+}
+if (/\bgarlic\b/.test(signedNames)) {
+  console.error("FAIL: signature plate kept unasked garlic:", signedNames);
+  process.exit(1);
+}
+if (/mustard/.test(signedNames)) {
+  console.error("FAIL: signature plate kept mustard on carbonara:", signedNames);
+  process.exit(1);
+}
+if (!/parmesan/.test(signedNames)) {
+  console.error("FAIL: carbonara missing parmesan signature:", signedNames);
+  process.exit(1);
+}
+const yogurtG = Number(
+  signed.ingredients.find((line) => /yogurt/i.test(line.name))?.quantity
+);
+if (yogurtG > 80) {
+  console.error(`FAIL: yogurt binder was a tub: ${yogurtG}g`);
+  process.exit(1);
+}
+if (/guilt|mimics|lighter twist/i.test(signed.psychological_reward_note + signed.tagline)) {
+  console.error("FAIL: permission copy still apologizes:", signed.psychological_reward_note);
+  process.exit(1);
+}
+const signedCook = repairCookMethod(signed, { effort: "weeknight" });
+const signedMethod = signedCook.steps.map((step) => step.instruction).join("\n");
+if (signedCook.steps.length > 4) {
+  console.error(`FAIL: signed carbonara has ${signedCook.steps.length} steps:\n`, signedMethod);
+  process.exit(1);
+}
+if (/spinach|mustard/i.test(signedMethod)) {
+  console.error("FAIL: dropped extras survived in the method:\n", signedMethod);
+  process.exit(1);
+}
+if (/blend|blitz|processor/i.test(signedMethod)) {
+  console.error("FAIL: weeknight carbonara still wants a blender:\n", signedMethod);
+  process.exit(1);
+}
+
+const creamyPasta = applySignaturePlate(
+  {
+    ...base,
+    name: "Weeknight creamy pasta",
+    original_craving: "creamy pasta",
+    tagline: "A healthier twist on cream sauce without the guilt.",
+    psychological_reward_note: "Creamy pasta without the guilt.",
+    ingredients: [
+      { name: "spaghetti", quantity: "90", unit: "g" },
+      { name: "chicken breast", quantity: "180", unit: "g" },
+      { name: "Greek yogurt", quantity: "180", unit: "g" },
+      { name: "spinach", quantity: "80", unit: "g" },
+      { name: "garlic", quantity: "8", unit: "g" },
+    ],
+    steps: [
+      { order: 1, instruction: "Boil pasta." },
+      { order: 2, instruction: "Sear chicken and wilt spinach." },
+    ],
+  } as GourmetRecipe,
+  { craving: "creamy pasta", targetCalories: 480 }
+);
+const creamyNames = creamyPasta.ingredients.map((line) => line.name.toLowerCase()).join(" ");
+if (/spinach/.test(creamyNames)) {
+  console.error("FAIL: unasked spinach survived on unnamed pasta:", creamyNames);
+  process.exit(1);
+}
+if (!/\bgarlic\b/.test(creamyNames)) {
+  console.error("FAIL: garlic on creamy pasta is the dish, not a carbonara exception:", creamyNames);
+  process.exit(1);
+}
+const creamyYogurt = Number(
+  creamyPasta.ingredients.find((line) => /yogurt/i.test(line.name))?.quantity
+);
+if (creamyYogurt > 100) {
+  console.error(`FAIL: yogurt binder not capped on unnamed pasta: ${creamyYogurt}g`);
+  process.exit(1);
+}
+if (!/parmesan/.test(creamyNames)) {
+  console.error("FAIL: dairy pasta missing cheese signature:", creamyNames);
+  process.exit(1);
+}
+if (/guilt|healthier twist/i.test(creamyPasta.psychological_reward_note + creamyPasta.tagline)) {
+  console.error("FAIL: unnamed pasta still apologizes:", creamyPasta.psychological_reward_note);
+  process.exit(1);
+}
+const creamyCook = repairCookMethod(creamyPasta, { effort: "weeknight" });
+if (creamyCook.steps.length > 4) {
+  console.error(`FAIL: unnamed pasta has ${creamyCook.steps.length} steps`);
+  process.exit(1);
+}
+if (/blend|blitz|processor/i.test(creamyCook.steps.map((s) => s.instruction).join("\n"))) {
+  console.error("FAIL: unnamed pasta called for a blender");
+  process.exit(1);
+}
+
+const burgerSigned = applySignaturePlate(
+  {
+    ...base,
+    name: "Chicken burger",
+    original_craving: "cheeseburger",
+    ingredients: [
+      { name: "Whole Wheat Burger Bun", quantity: "70", unit: "g" },
+      { name: "chicken breast", quantity: "160", unit: "g" },
+      { name: "lettuce leaves", quantity: "30", unit: "g" },
+      { name: "spinach", quantity: "80", unit: "g" },
+    ],
+    steps: [{ order: 1, instruction: "Toast the bun. Sear the chicken. Wilt spinach." }],
+  } as GourmetRecipe,
+  { craving: "cheeseburger" }
+);
+const burgerNames = burgerSigned.ingredients.map((line) => line.name.toLowerCase()).join(" ");
+if (/spinach/.test(burgerNames)) {
+  console.error("FAIL: wilted spinach survived on a burger:", burgerNames);
+  process.exit(1);
+}
+if (!/lettuce|greens/.test(burgerNames)) {
+  console.error("FAIL: burger lettuce was dropped as volume:", burgerNames);
+  process.exit(1);
+}
+if (!/bun/.test(burgerNames)) {
+  console.error("FAIL: burger lost its bun:", burgerNames);
+  process.exit(1);
+}
+
+const tikka = applySignaturePlate(
+  {
+    ...base,
+    name: "Chicken tikka bowl",
+    original_craving: "chicken tikka masala",
+    tagline: "A healthier twist without the guilt.",
+    psychological_reward_note: "Tikka without the guilt.",
+    ingredients: [
+      { name: "White rice", quantity: "80", unit: "g" },
+      { name: "chicken breast", quantity: "180", unit: "g" },
+      { name: "Greek yogurt", quantity: "160", unit: "g" },
+      { name: "spinach", quantity: "70", unit: "g" },
+      { name: "garlic", quantity: "8", unit: "g" },
+    ],
+    steps: [
+      { order: 1, instruction: "Cook rice. Sear chicken. Wilt spinach. Stir yogurt." },
+    ],
+  } as GourmetRecipe,
+  { craving: "chicken tikka masala" }
+);
+const tikkaNames = tikka.ingredients.map((line) => line.name.toLowerCase()).join(" ");
+if (/spinach/.test(tikkaNames)) {
+  console.error("FAIL: unasked spinach survived on tikka:", tikkaNames);
+  process.exit(1);
+}
+if (!/\bgarlic\b/.test(tikkaNames)) {
+  console.error("FAIL: tikka lost garlic:", tikkaNames);
+  process.exit(1);
+}
+if (/parmesan/.test(tikkaNames)) {
+  console.error("FAIL: tikka should not gain Italian cheese:", tikkaNames);
+  process.exit(1);
+}
+const tikkaYogurt = Number(
+  tikka.ingredients.find((line) => /yogurt/i.test(line.name))?.quantity
+);
+if (tikkaYogurt > 100) {
+  console.error(`FAIL: yogurt not capped on tikka: ${tikkaYogurt}g`);
+  process.exit(1);
+}
+const tikkaCook = repairCookMethod(tikka, { effort: "weeknight" });
+if (tikkaCook.steps.length > 4) {
+  console.error(`FAIL: tikka has ${tikkaCook.steps.length} steps`);
+  process.exit(1);
+}
+if (/parmesan|carbonara|alfredo/i.test(tikkaCook.steps.map((s) => s.instruction).join("\n"))) {
+  console.error("FAIL: tikka method borrowed a pasta identity");
   process.exit(1);
 }
 

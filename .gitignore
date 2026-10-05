@@ -22,6 +22,10 @@
 /last-recipe[0-9].json
 /last-recipe[0-9].md
 
+# scratch Elevate card captures (print-to-PDF and page screenshots)
+/test-*.pdf
+/.alfredo-pages/
+
 # next.js
 /.next/
 /out/

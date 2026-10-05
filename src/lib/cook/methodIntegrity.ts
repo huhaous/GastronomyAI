@@ -14,9 +14,9 @@ import {
   type IngredientNode,
 } from "@/data/knowledgeGraph";
 import { emulsionEggOnPlate } from "@/lib/cook/carbonaraEmulsion";
+import { resolveMealIdentity, starchCookFromText } from "@/lib/cook/mealIdentity";
 import { classifyGroup } from "@/lib/nutrition/portionScaling";
 import type { CookEffort, GourmetRecipe, RecipeStep } from "@/types/recipe";
-import { WEEKNIGHT_MAX_STEPS } from "@/lib/cookability";
 
 const GENERIC_FIRST = new Set([
   "white",
@@ -36,9 +36,6 @@ const GENERIC_FIRST = new Set([
   "hot",
   "dry",
 ]);
-
-const ROLE_SUFFIX =
-  "(?:\\s+(?:noodles?|ribbons?|mixture|spirals?|zoodles?|pasta|rice))?";
 
 const COLD_DAIRY = /yogurt|yoghurt|cottage cheese|quark|fromage blanc/i;
 const BLEND = /blend|blitz|puree|purée|whisk|processor|smoothie|emulsif/i;
@@ -70,9 +67,15 @@ function identityPhrases(node: IngredientNode): string[] {
     .replace(/[\/]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const first = primary.split(/\s+/)[0] ?? "";
-  if (first.length >= 4 && !GENERIC_FIRST.has(first.toLowerCase())) {
-    phrases.push(first);
+  const words = primary.split(/\s+/).filter(Boolean);
+  // Only a one-word food ("onion", "pasta") may delete by its first token.
+  // "Tomato Paste" must not steal "tomato" off a plate that still has tomato.
+  if (
+    words.length === 1 &&
+    words[0].length >= 4 &&
+    !GENERIC_FIRST.has(words[0].toLowerCase())
+  ) {
+    phrases.push(words[0]);
   }
   const seen = new Set<string>();
   return phrases
@@ -119,7 +122,37 @@ function starchReplacement(recipe: GourmetRecipe): string {
 }
 
 function phraseIn(text: string, phrase: string): boolean {
-  return new RegExp(`\\b${escapeRe(phrase)}s?\\b`, "i").test(text);
+  return new RegExp(
+    `(?<![A-Za-z-])${escapeRe(phrase)}s?(?![A-Za-z-])`,
+    "i"
+  ).test(text);
+}
+
+/**
+ * On-plate names are atomic. Dry rice must not delete the word "rice"
+ * out of "cooked rice" just because that node is not on the list.
+ */
+function maskPhrases(
+  text: string,
+  phrases: Set<string>
+): { text: string; restore: (value: string) => string } {
+  const held: string[] = [];
+  let next = text;
+  for (const phrase of [...phrases].sort((a, b) => b.length - a.length)) {
+    if (!phrase) continue;
+    next = next.replace(
+      new RegExp(`(?<![A-Za-z-])${escapeRe(phrase)}s?(?![A-Za-z-])`, "gi"),
+      (match) => {
+        held.push(match);
+        return `\uE000${held.length - 1}\uE001`;
+      }
+    );
+  }
+  return {
+    text: next,
+    restore: (value) =>
+      value.replace(/\uE000(\d+)\uE001/g, (_, idx) => held[Number(idx)] ?? ""),
+  };
 }
 
 function tidyInstruction(text: string): string {
@@ -174,59 +207,45 @@ function isVolumeNoodleSentence(sentence: string): boolean {
   return false;
 }
 
-function mentionsOffPlate(sentence: string, offPlate: IngredientNode[]): boolean {
+function mentionsOffPlate(
+  sentence: string,
+  offPlate: IngredientNode[],
+  protectedPhrases?: Set<string>
+): boolean {
+  const haystack = protectedPhrases
+    ? maskPhrases(sentence, protectedPhrases).text
+    : sentence;
   return offPlate.some((node) =>
-    identityPhrases(node).some((phrase) => phraseIn(sentence, phrase))
-  );
-}
-
-function deleteOffPlatePhrases(text: string, offPlate: IngredientNode[]): string {
-  let next = text;
-  for (const node of offPlate) {
-    for (const phrase of identityPhrases(node)) {
-      next = next.replace(
-        new RegExp(`\\b${escapeRe(phrase)}s?${ROLE_SUFFIX}\\b`, "gi"),
-        ""
-      );
-    }
-  }
-  return tidyInstruction(next);
-}
-
-function offPlateNoodleFoods(offPlate: IngredientNode[]): IngredientNode[] {
-  return offPlate.filter(
-    (node) =>
-      node.handling?.volumeNoodle ||
-      /zucchini|konjac|shirataki|courgette/i.test(node.name)
+    identityPhrases(node).some((phrase) => phraseIn(haystack, phrase))
   );
 }
 
 /**
- * Off-plate volume foods are gone from the list. Delete them from the method.
- * Never substitute the remaining starch name into a vegetable-noodle sentence
- * ("chop the zucchini" must not become "chop the pasta").
+ * Off-plate volume foods are gone from the list. Drop the cook that named
+ * them — never delete a noun and patch the leftover grammar.
  */
+function platePhrases(recipe: GourmetRecipe): Set<string> {
+  const phrases = new Set<string>();
+  for (const line of recipe.ingredients) {
+    const node = findIngredientNode(line.name);
+    if (!node) continue;
+    for (const phrase of identityPhrases(node)) phrases.add(phrase);
+    if (node.handling?.starchFamily) phrases.add(node.handling.starchFamily);
+  }
+  return phrases;
+}
+
 function scrubText(
   text: string | undefined,
-  offPlate: IngredientNode[]
+  offPlate: IngredientNode[],
+  protectedPhrases: Set<string>
 ): string | undefined {
   if (!text) return text;
-  const strayNoodles = offPlateNoodleFoods(offPlate);
-  const starchGone = offPlate.filter((node) => Boolean(node.handling?.starchCook));
   const kept = splitSentences(text).flatMap((sentence) => {
-    if (isStarchMethodSentence(sentence, starchGone)) {
+    if (mentionsOffPlate(sentence, offPlate, protectedPhrases)) {
       return [];
     }
-    if (
-      mentionsOffPlate(sentence, strayNoodles) &&
-      isVolumeNoodleSentence(sentence)
-    ) {
-      return [];
-    }
-    const next = deleteOffPlatePhrases(sentence, offPlate);
-    if (next.length < 12) return [];
-    if (/^(chop|toss|add to|blend) the[.]*$/i.test(next)) return [];
-    return [/\.$/.test(next) ? next : `${next}.`];
+    return [/\.$/.test(sentence) ? sentence : `${sentence}.`];
   });
   if (kept.length === 0) return "";
   return kept.join(" ");
@@ -234,9 +253,24 @@ function scrubText(
 
 function offPlateVolumeFoods(recipe: GourmetRecipe): IngredientNode[] {
   const onPlate = onPlateNodes(recipe);
-  return allFoodNodes().filter(
-    (node) => !onPlate.has(node.name) && isVolumeOrStarch(node)
-  );
+  const families = new Set<string>();
+  for (const line of recipe.ingredients) {
+    const family = findIngredientNode(line.name)?.handling?.starchFamily;
+    if (family) families.add(family);
+  }
+  return allFoodNodes().filter((node) => {
+    if (onPlate.has(node.name)) return false;
+    if (node.handling?.starchFamily && families.has(node.handling.starchFamily)) {
+      return false;
+    }
+    if (
+      node.handling?.breakOnDirectHeat &&
+      node.handling?.emulsionRole !== "lecithin"
+    ) {
+      return true;
+    }
+    return isVolumeOrStarch(node);
+  });
 }
 
 function mapSteps(
@@ -258,20 +292,21 @@ function mapSteps(
 function scrubOffPlateFoods<T extends GourmetRecipe>(recipe: T): T {
   const stray = offPlateVolumeFoods(recipe);
   if (stray.length === 0) return recipe;
-  const scrub = (text?: string) => scrubText(text, stray);
+  const protectedPhrases = platePhrases(recipe);
+  const scrub = (text?: string) => scrubText(text, stray, protectedPhrases);
 
   return {
     ...recipe,
-    tagline: scrub(recipe.tagline) || recipe.tagline,
+    tagline: scrub(recipe.tagline) ?? recipe.tagline,
     psychological_reward_note:
-      scrub(recipe.psychological_reward_note) || recipe.psychological_reward_note,
+      scrub(recipe.psychological_reward_note) ?? recipe.psychological_reward_note,
     steps: mapSteps(recipe.steps, (instruction, tip) => ({
       instruction: scrub(instruction) || "",
       tip: scrub(tip) || undefined,
     })),
     plating: {
       ...recipe.plating,
-      composition: scrub(recipe.plating.composition) || recipe.plating.composition,
+      composition: scrub(recipe.plating.composition) ?? recipe.plating.composition,
       color_contrast: scrub(recipe.plating.color_contrast),
       garnish: scrub(recipe.plating.garnish),
       social_caption: scrub(recipe.plating.social_caption),
@@ -375,7 +410,15 @@ function bloomAlliumsBeforeColdDairy<T extends GourmetRecipe>(recipe: T): T {
         BLEND.test(step.instruction)
     );
     if (blend) {
-      blend.instruction = stripAlliumFromBlend(blend.instruction, node);
+      const split = blend.instruction.match(
+        /^(.*?)((?:[. ]+then\s+)?assemble\b.*)$/i
+      );
+      const whiskPart = split ? split[1].trim() : blend.instruction;
+      const assemblePart = split ? split[2].trim() : "";
+      const stripped = stripAlliumFromBlend(whiskPart, node);
+      blend.instruction = assemblePart
+        ? `${stripped.replace(/\.\s*$/, "")}. ${assemblePart}`
+        : stripped;
       if (!/off the heat|off heat/i.test(blend.instruction)) {
         blend.instruction = `${blend.instruction.replace(/\.\s*$/, "")}. Stir it into the pan off the heat.`;
       }
@@ -598,11 +641,59 @@ function insertBeforeServe(steps: RecipeStep[], instruction: string): RecipeStep
   return withNew.map((step, i) => ({ ...step, order: i + 1 }));
 }
 
+function joinLabels(names: string[]): string {
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and the ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and the ${names[names.length - 1]}`;
+}
+
+function appendToMatchingStep(
+  steps: RecipeStep[],
+  extra: string,
+  test: (instruction: string) => boolean
+): RecipeStep[] {
+  const idx = [...steps.keys()].reverse().find((i) => test(steps[i].instruction));
+  if (idx == null) return insertBeforeServe(steps, extra);
+  if (steps[idx].instruction.includes(extra.replace(/\.$/, ""))) return steps;
+  const copy = steps.map((step) => ({ ...step }));
+  copy[idx] = {
+    ...copy[idx],
+    instruction: `${copy[idx].instruction.replace(/\.\s*$/, "")}. ${extra}`,
+  };
+  return copy;
+}
+
+function missingRoleLines(
+  recipe: GourmetRecipe,
+  method: string,
+  role: NonNullable<IngredientNode["handling"]>["methodRole"]
+): { node: IngredientNode; label: string }[] {
+  const seen = new Set<string>();
+  const missing: { node: IngredientNode; label: string }[] = [];
+  for (const line of recipe.ingredients) {
+    const node = findIngredientNode(line.name);
+    if (!node || node.handling?.methodRole !== role) continue;
+    if (mentionsNode(method, node)) continue;
+    const label = cookLabel(node).toLowerCase();
+    if (seen.has(label)) continue;
+    seen.add(label);
+    missing.push({ node, label });
+  }
+  return missing;
+}
+
 function applyMethodRoles<T extends GourmetRecipe>(recipe: T): T {
   let steps = recipe.steps.slice().sort((a, b) => a.order - b.order);
   const method = () => steps.map((step) => step.instruction).join(" ");
   const starch = starchReplacement(recipe);
   const phrases = pastaPhrases(recipe);
+
+  if (!SEAR.test(method())) {
+    const sear = shortSearInstruction(recipe);
+    if (sear) {
+      steps = [{ order: 1, instruction: sear }, ...steps];
+    }
+  }
 
   for (const line of recipe.ingredients) {
     const node = findIngredientNode(line.name);
@@ -640,11 +731,14 @@ function applyMethodRoles<T extends GourmetRecipe>(recipe: T): T {
 
     if (node.handling.methodRole === "finish") {
       if (mentionsNode(method(), node)) continue;
+      const cheese = /parmesan|cheddar|feta|mozzarella|cheese/i.test(name);
+      const extra = cheese
+        ? `Finish with the ${name} off the heat.`
+        : `Finish with the ${name}.`;
       const tossAt = [...steps]
         .map((step, i) => ({ step, i }))
         .reverse()
-        .find(({ step }) => /toss|sauce|fold/i.test(step.instruction))?.i;
-      const extra = `Finish with the ${name} off the heat.`;
+        .find(({ step }) => /toss|sauce|fold|fragrant|stir/i.test(step.instruction))?.i;
       if (tossAt != null) {
         if (mentionsNode(steps[tossAt].instruction, node)) continue;
         steps[tossAt] = {
@@ -655,6 +749,67 @@ function applyMethodRoles<T extends GourmetRecipe>(recipe: T): T {
         steps = insertBeforeServe(steps, extra);
       }
     }
+  }
+
+  const folds = missingRoleLines(recipe, method(), "fold_into_sauce");
+  if (folds.length > 0) {
+    steps = appendToMatchingStep(
+      steps,
+      `Fold the ${joinLabels(folds.map((item) => item.label))} through the sauce.`,
+      (instruction) =>
+        /fragrant|sauce|stir|brown|sear/i.test(instruction) &&
+        !/\b(assemble|warm the)\b/i.test(instruction)
+    );
+  }
+
+  const slurries = missingRoleLines(recipe, method(), "slurry");
+  if (slurries.length > 0) {
+    const stock = recipe.ingredients.find((line) => {
+      const node = findIngredientNode(line.name);
+      return node?.name === "Broth / Stock" && !mentionsNode(method(), node);
+    });
+    const stockNode = stock ? findIngredientNode(stock.name) : undefined;
+    const stockLabel = stockNode ? cookLabel(stockNode).toLowerCase() : undefined;
+    const gel = joinLabels(slurries.map((item) => item.label));
+    const extra = stockLabel
+      ? `Stir the ${stockLabel} and ${gel} through until glossy.`
+      : `Stir the ${gel} through until glossy.`;
+    steps = appendToMatchingStep(
+      steps,
+      extra,
+      (instruction) =>
+        /fold|fragrant|stir|sauce|glossy/i.test(instruction) &&
+        !/\b(assemble|warm the)\b/i.test(instruction)
+    );
+  }
+
+  const mixed = missingRoleLines(recipe, method(), "mix_in");
+  if (mixed.length > 0) {
+    steps = appendToMatchingStep(
+      steps,
+      `Mix the ${joinLabels(mixed.map((item) => item.label))} into the meat.`,
+      (instruction) => /\b(mix|patty|form)\b/i.test(instruction)
+    );
+  }
+
+  const sauces = missingRoleLines(recipe, method(), "sauce_join");
+  if (sauces.length > 0) {
+    steps = appendToMatchingStep(
+      steps,
+      `Stir in the ${joinLabels(sauces.map((item) => item.label))}.`,
+      (instruction) =>
+        /whisk|stir|sauce|fragrant|bloom/i.test(instruction) &&
+        !/\bassemble\b/i.test(instruction)
+    );
+  }
+
+  const stacked = missingRoleLines(recipe, method(), "assemble");
+  if (stacked.length > 0) {
+    steps = appendToMatchingStep(
+      steps,
+      `Add the ${joinLabels(stacked.map((item) => item.label))}.`,
+      (instruction) => /\b(assemble|bun|stack|topping)\b/i.test(instruction)
+    );
   }
 
   return { ...recipe, steps: steps.map((step, i) => ({ ...step, order: i + 1 })) };
@@ -777,30 +932,59 @@ function recipeWantsToast(recipe: GourmetRecipe): boolean {
     "original_craving" in recipe
       ? String((recipe as { original_craving?: string }).original_craving ?? "")
       : "";
-  const text = `${recipe.name} ${craving}`.toLowerCase();
-  return (
-    /burger|cheeseburger|hamburger|slider/.test(text) || /\bsandwich\b/.test(text)
-  );
+  return starchCookFromText(`${recipe.name} ${craving}`) === "toast_assemble";
+}
+
+function starchGrams(
+  recipe: GourmetRecipe,
+  cook: NonNullable<IngredientNode["handling"]>["starchCook"]
+): number | undefined {
+  for (const line of recipe.ingredients) {
+    const node = findIngredientNode(line.name);
+    if (!node) continue;
+    if (node.handling?.starchCook !== cook) continue;
+    if (node.handling?.volumeNoodle) continue;
+    const grams = Number.parseFloat(line.quantity);
+    if (Number.isFinite(grams) && grams > 0) return Math.round(grams);
+  }
+  return undefined;
 }
 
 /**
  * One plate, one starch cook. A bun is toasted and assembled; leftover pasta
  * or quinoa from a previous craving is not a second carb vehicle.
  */
+const STARCH_PRIORITY = [
+  "toast_assemble",
+  "boil_reserve_toss",
+  "reheat",
+  "simmer",
+] as const;
+
 function resolveStarchIdentity<T extends GourmetRecipe>(recipe: T): T {
-  let hasToast = false;
-  const foreign: string[] = [];
+  let winner: (typeof STARCH_PRIORITY)[number] | undefined;
+  for (const cook of STARCH_PRIORITY) {
+    if (cook === "toast_assemble" && recipeWantsToast(recipe)) {
+      winner = "toast_assemble";
+      break;
+    }
+    if (plateHasStarchCook(recipe, cook)) {
+      winner = cook;
+      break;
+    }
+  }
+  if (!winner && recipeWantsToast(recipe)) winner = "toast_assemble";
+  if (!winner) return recipe;
+
+  const drop = new Set<string>();
   for (const line of recipe.ingredients) {
     const node = findIngredientNode(line.name);
     const cook = node?.handling?.starchCook;
     if (!node || !cook || node.handling?.volumeNoodle) continue;
-    if (cook === "toast_assemble") hasToast = true;
-    else foreign.push(node.name);
+    if (cook !== winner) drop.add(node.name);
   }
-  const dropForeign = hasToast || recipeWantsToast(recipe);
-  if (!dropForeign || foreign.length === 0) return recipe;
+  if (drop.size === 0) return recipe;
 
-  const drop = new Set(foreign);
   return {
     ...recipe,
     ingredients: recipe.ingredients.filter((line) => {
@@ -842,19 +1026,6 @@ function isPastaTemplateSentence(sentence: string, phrases: string[]): boolean {
   return false;
 }
 
-function isStarchMethodSentence(sentence: string, nodes: IngredientNode[]): boolean {
-  if (!mentionsOffPlate(sentence, nodes)) return false;
-  if (isPastaTemplateSentence(sentence, DEFAULT_PASTA_PHRASES)) return true;
-  if (
-    /\b(boil|simmer|cook until tender)\b/i.test(sentence) &&
-    /quinoa|rice|pasta|couscous/i.test(sentence)
-  ) {
-    return true;
-  }
-  if (/fold through so the plate has the starch/i.test(sentence)) return true;
-  return false;
-}
-
 function isFinishStep(instruction: string): boolean {
   return (
     /slice the .+ and fold it through/i.test(instruction) ||
@@ -867,6 +1038,11 @@ function isBrokenFragment(sentence: string): boolean {
   if (t.length < 12) return true;
   if (/\s+(?:and|or|with|plus)\s*[.,]?\s*$/i.test(t)) return true;
   if (/^(add|stir|mix|fold)\b.{0,40}\band\s*[.]?$/i.test(t)) return true;
+  if (/\bthe cooked\b/i.test(t) && !/\bcooked [a-z]/i.test(t)) return true;
+  if (/\bthe closed\b/i.test(t)) return true;
+  if (/\band remaining\.?$/i.test(t)) return true;
+  if (/\b\d+(?:\.\d+)?\s*g,\s/i.test(t)) return true;
+  if (/\beat a,\s/i.test(t)) return true;
   return false;
 }
 
@@ -914,12 +1090,12 @@ function dairySauceInstruction(recipe: GourmetRecipe): string {
     const eggNode = findIngredientNode(egg.name);
     const eggLabel = (eggNode ? cookLabel(eggNode) : egg.name).toLowerCase();
     const mustard = recipe.ingredients.some((line) => /mustard/i.test(line.name));
-    return `Take the pan off the heat. Blend the ${raw.toLowerCase()} with the ${eggLabel}${mustard ? ", mustard," : ""} and a splash of reserved pasta water until the carbonara emulsion is glossy. Residual heat only — never scramble.`;
+    return `Take the pan off the heat. Whisk the ${raw.toLowerCase()} with the ${eggLabel}${mustard ? ", mustard," : ""} and a splash of reserved pasta water until the emulsion is glossy. Residual heat only — never scramble.`;
   }
   return `Take the pan off the heat. Stir in the ${raw.toLowerCase()} until the sauce is smooth. Do not return it to a live flame.`;
 }
 
-function pastaTossInstruction(recipe: GourmetRecipe): string {
+function pastaTossInstruction(recipe: GourmetRecipe, slicedInSear: boolean): string {
   const starch = starchReplacement(recipe);
   const parts = [
     "Toss the drained pasta with the sauce off the heat. Loosen with reserved pasta water so it clings.",
@@ -927,8 +1103,11 @@ function pastaTossInstruction(recipe: GourmetRecipe): string {
   for (const line of recipe.ingredients) {
     const node = findIngredientNode(line.name);
     if (node?.handling?.methodRole !== "combine_after_sear") continue;
+    const meat = cookLabel(node).toLowerCase();
     parts.push(
-      `Slice the ${cookLabel(node).toLowerCase()} and fold it through the ${starch} and sauce.`
+      slicedInSear
+        ? `Fold the ${meat} through the ${starch} and sauce.`
+        : `Slice the ${meat} and fold it through the ${starch} and sauce.`
     );
   }
   for (const line of recipe.ingredients) {
@@ -936,8 +1115,109 @@ function pastaTossInstruction(recipe: GourmetRecipe): string {
     if (node?.handling?.methodRole !== "finish") continue;
     parts.push(`Finish with the ${cookLabel(node).toLowerCase()} off the heat.`);
   }
+  if (recipe.ingredients.some((line) => /pepper/i.test(line.name))) {
+    const toss = parts.join(" ");
+    if (!/pepper/i.test(toss)) {
+      parts.push("Finish with plenty of black pepper.");
+    }
+  }
   parts.push("Serve immediately.");
   return parts.join(" ");
+}
+
+function shortSearInstruction(recipe: GourmetRecipe): string | undefined {
+  const meats: string[] = [];
+  let garlic: string | undefined;
+  for (const line of recipe.ingredients) {
+    const node = findIngredientNode(line.name);
+    if (!node) continue;
+    if (node.handling?.methodRole === "combine_after_sear") {
+      meats.push(cookLabel(node).toLowerCase());
+    }
+    if (node.handling?.bloomBeforeColdDairy) {
+      garlic = cookLabel(node).toLowerCase();
+    }
+  }
+  const wiltNames: string[] = [];
+  for (const line of recipe.ingredients) {
+    const node = findIngredientNode(line.name);
+    if (!node) continue;
+    if (node.handling?.methodRole === "combine_after_sear") {
+      meats.push(cookLabel(node).toLowerCase());
+    }
+    if (node.handling?.bloomBeforeColdDairy) {
+      garlic = cookLabel(node).toLowerCase();
+    }
+    if (node.handling?.elevationRole === "volume") {
+      if (node.handling.countAsPiece && plateHasStarchCook(recipe, "toast_assemble")) {
+        continue;
+      }
+      wiltNames.push(cookLabel(node).toLowerCase());
+    }
+  }
+  if (meats.length === 0 && !garlic && wiltNames.length === 0) return undefined;
+  const pepper = recipe.ingredients.some((line) => /pepper/i.test(line.name));
+  const meat = meats[0];
+  const seasoned = meat
+    ? pepper
+      ? `Season the ${meat} with plenty of black pepper and sear until cooked through.`
+      : `Sear the ${meat} until cooked through.`
+    : undefined;
+  const bloom = garlic
+    ? `In the last 30 seconds add the ${garlic} and cook until fragrant.`
+    : undefined;
+  const wilt = wiltNames.length
+    ? `Wilt the ${wiltNames.join(" and ")} in the same pan.`
+    : undefined;
+  return [seasoned, bloom, wilt].filter(Boolean).join(" ");
+}
+
+function weeknightPastaFinish(recipe: GourmetRecipe): string {
+  const dairy = recipe.ingredients.find((line) => COLD_DAIRY.test(line.name));
+  const dairyNode = dairy ? findIngredientNode(dairy.name) : undefined;
+  const dairyLabel = dairyNode ? cookLabel(dairyNode).toLowerCase() : "greek yogurt";
+  const egg = emulsionEggOnPlate(recipe);
+  const eggLabel = egg
+    ? (findIngredientNode(egg.name)
+        ? cookLabel(findIngredientNode(egg.name)!).toLowerCase()
+        : egg.name.toLowerCase())
+    : undefined;
+  const cheese = recipe.ingredients.find((line) => {
+    const node = findIngredientNode(line.name);
+    return node?.handling?.methodRole === "finish";
+  });
+  const cheeseLabel = cheese
+    ? cookLabel(findIngredientNode(cheese.name)!).toLowerCase()
+    : undefined;
+  const meat = recipe.ingredients.find((line) => {
+    const node = findIngredientNode(line.name);
+    return node?.handling?.methodRole === "combine_after_sear";
+  });
+  const meatLabel = meat
+    ? cookLabel(findIngredientNode(meat.name)!).toLowerCase()
+    : undefined;
+  const whisk = eggLabel
+    ? `Whisk the ${dairyLabel} with the ${eggLabel} and a splash of reserved pasta water until glossy.`
+    : `Stir in the ${dairyLabel} and a splash of reserved pasta water until smooth.`;
+  const fold = meatLabel ? ` Fold through the ${meatLabel}.` : "";
+  const finish = cheeseLabel
+    ? ` Finish with the ${cheeseLabel} and plenty of black pepper.`
+    : " Finish with plenty of black pepper.";
+  const heat = eggLabel
+    ? " Residual heat only — never scramble."
+    : " Do not return it to a live flame.";
+  return `Take the pan off the heat. ${whisk} Toss in the pasta.${fold}${finish}${heat} Serve immediately.`;
+}
+
+function dropBlenderIfUnused<T extends GourmetRecipe>(recipe: T): T {
+  const method = recipe.steps.map((step) => step.instruction).join(" ");
+  const usesMachine = /blend|blitz|puree|purée|processor|smoothie/i.test(method);
+  if (usesMachine) return recipe;
+  const tools = (recipe.tools_used ?? []).filter(
+    (tool) => tool !== "blender" && tool !== "immersion_blender"
+  );
+  if (tools.length === (recipe.tools_used ?? []).length) return recipe;
+  return { ...recipe, tools_used: tools };
 }
 
 function joinSlot(sentences: string[]): string | undefined {
@@ -961,10 +1241,15 @@ function joinSlot(sentences: string[]): string | undefined {
  * sear / sauce / greens the list still needs. Vegetable-noodle actions,
  * bowl-combines, and extra finish numbers are not kept and patched.
  */
-function rebuildPastaMethod<T extends GourmetRecipe>(recipe: T): T {
+function rebuildPastaMethod<T extends GourmetRecipe>(
+  recipe: T,
+  effort?: CookEffort
+): T {
   const grams = pastaGrams(recipe);
   if (grams == null) return recipe;
   const phrases = pastaPhrases(recipe);
+  const tight = effort !== "project" && effort !== "batch";
+  const identity = resolveMealIdentity(recipe);
 
   const sears: string[] = [];
   const sauces: string[] = [];
@@ -1000,19 +1285,31 @@ function rebuildPastaMethod<T extends GourmetRecipe>(recipe: T): T {
   }
 
   const boilText = `Boil ${grams}g dry pasta until al dente. Reserve a splash of pasta water, then drain.`;
-  const searText = joinSlot([...sears, ...greens]);
+  const compiledSear = tight
+    ? shortSearInstruction(recipe)
+    : joinSlot(identity?.dropVolumeUnlessAsked ? sears : [...sears, ...greens]);
+  const searText = compiledSear ?? joinSlot(sears);
   const egg = emulsionEggOnPlate(recipe);
   const compiledSauce = joinSlot(sauces);
   const sauceText =
     egg && (!compiledSauce || !/egg|yolk/i.test(compiledSauce))
       ? dairySauceInstruction(recipe)
       : compiledSauce ?? dairySauceInstruction(recipe);
-  const tossText = pastaTossInstruction(recipe);
+  const slicedInSear = Boolean(
+    searText && /slice|strip/i.test(searText)
+  );
 
   const steps: RecipeStep[] = [{ order: 1, instruction: boilText }];
   if (searText) steps.push({ order: 0, instruction: searText });
-  steps.push({ order: 0, instruction: sauceText });
-  steps.push({ order: 0, instruction: tossText });
+  if (tight) {
+    steps.push({ order: 0, instruction: weeknightPastaFinish(recipe) });
+  } else {
+    steps.push({ order: 0, instruction: sauceText });
+    steps.push({
+      order: 0,
+      instruction: pastaTossInstruction(recipe, slicedInSear),
+    });
+  }
 
   const composition = recipe.plating.composition ?? "";
   const plating =
@@ -1030,9 +1327,136 @@ function rebuildPastaMethod<T extends GourmetRecipe>(recipe: T): T {
   };
 }
 
+function rebuildToastMethod<T extends GourmetRecipe>(
+  recipe: T,
+  effort?: CookEffort
+): T {
+  if (!plateHasStarchCook(recipe, "toast_assemble")) return recipe;
+  if (effort === "project" || effort === "batch") return recipe;
+  const method = recipe.steps.map((step) => step.instruction).join(" ");
+  const volumeNoodle = recipe.steps.some((step) =>
+    isVolumeNoodleSentence(step.instruction)
+  );
+  if (/\bbuns?\b/i.test(method) && !volumeNoodle) {
+    return recipe;
+  }
+  if (!volumeNoodle) {
+    const bunLine = recipe.ingredients.find((line) => {
+      const node = findIngredientNode(line.name);
+      return node?.handling?.starchCook === "toast_assemble";
+    });
+    const bun = bunLine
+      ? cookLabel(findIngredientNode(bunLine.name)!).toLowerCase()
+      : "bun";
+    if (/\bbuns?\b/i.test(method)) return recipe;
+    const toast = `Toast the ${bun} until crisp.`;
+    if (recipe.steps.some((step) => step.instruction === toast)) return recipe;
+    return {
+      ...recipe,
+      steps: [{ order: 1, instruction: toast }, ...recipe.steps].map(
+        (step, i) => ({ ...step, order: i + 1 })
+      ),
+    };
+  }
+  const sear = shortSearInstruction(recipe);
+  const meat = recipe.ingredients.find((line) => {
+    const node = findIngredientNode(line.name);
+    return node?.handling?.methodRole === "combine_after_sear";
+  });
+  const leaf = recipe.ingredients.find((line) => {
+    const node = findIngredientNode(line.name);
+    return node?.handling?.countAsPiece && node.handling.elevationRole === "volume";
+  });
+  const dairy = recipe.ingredients.find((line) =>
+    /yogurt|yoghurt|cottage cheese/i.test(line.name)
+  );
+  const meatLabel = meat
+    ? cookLabel(findIngredientNode(meat.name)!).toLowerCase()
+    : undefined;
+  const leafLabel = leaf
+    ? cookLabel(findIngredientNode(leaf.name)!).toLowerCase()
+    : undefined;
+  const assemble = [
+    "Assemble on the bun.",
+    meatLabel ? `Add the ${meatLabel}.` : "",
+    leafLabel ? `Add the ${leafLabel}.` : "",
+    dairy ? "Spoon the sauce on." : "",
+    "Place the top bun on.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const steps: RecipeStep[] = [
+    { order: 1, instruction: "Toast the bun until crisp." },
+  ];
+  if (sear) steps.push({ order: 0, instruction: sear });
+  steps.push({ order: 0, instruction: assemble });
+
+  return {
+    ...recipe,
+    steps: steps.map((step, i) => ({ ...step, order: i + 1 })),
+  };
+}
+
+function rebuildReheatMethod<T extends GourmetRecipe>(recipe: T): T {
+  if (!plateHasStarchCook(recipe, "reheat")) return recipe;
+  const method = recipe.steps.map((step) => step.instruction).join(" ");
+  const line = recipe.ingredients.find((item) => {
+    const node = findIngredientNode(item.name);
+    return node?.handling?.starchCook === "reheat";
+  });
+  const node = line ? findIngredientNode(line.name) : undefined;
+  if (node && mentionsNode(method, node)) return recipe;
+  const starchName = node ? cookLabel(node).toLowerCase() : "cooked rice";
+  if (recipe.steps.some((step) => /warm the /i.test(step.instruction))) {
+    return recipe;
+  }
+  const warm = `Warm the ${starchName}.`;
+  return {
+    ...recipe,
+    steps: [{ order: 1, instruction: warm }, ...recipe.steps].map((step, i) => ({
+      ...step,
+      order: i + 1,
+    })),
+  };
+}
+
+function rebuildSimmerMethod<T extends GourmetRecipe>(
+  recipe: T,
+  effort?: CookEffort
+): T {
+  if (pastaGrams(recipe) != null) return recipe;
+  if (plateHasStarchCook(recipe, "toast_assemble")) return recipe;
+  if (plateHasStarchCook(recipe, "reheat")) return recipe;
+  const grams = starchGrams(recipe, "simmer");
+  if (grams == null) return recipe;
+  if (effort === "project" || effort === "batch") return recipe;
+  let starchName = "rice";
+  let starchNode: IngredientNode | undefined;
+  for (const line of recipe.ingredients) {
+    const node = findIngredientNode(line.name);
+    if (node?.handling?.starchCook === "simmer") {
+      starchName = cookLabel(node).toLowerCase();
+      starchNode = node;
+      break;
+    }
+  }
+  const method = recipe.steps.map((step) => step.instruction).join(" ");
+  if (starchNode && mentionsNode(method, starchNode)) return recipe;
+  if (/\b(rice|quinoa)\b/i.test(method)) return recipe;
+  const simmer = `Simmer ${grams}g ${starchName} until tender.`;
+  return {
+    ...recipe,
+    steps: [{ order: 1, instruction: simmer }, ...recipe.steps].map((step, i) => ({
+      ...step,
+      order: i + 1,
+    })),
+  };
+}
+
 /**
- * Non-pasta weeknight overflow only. Pasta methods are compiled to the slot
- * count above — they must not be squeezed after the fact.
+ * Weeknight overflow: drop extra volume actions. Do not glue two verbs into
+ * one paragraph — that is how "simple" becomes unreadable.
  */
 function packWeeknightSteps<T extends GourmetRecipe>(
   recipe: T,
@@ -1041,25 +1465,15 @@ function packWeeknightSteps<T extends GourmetRecipe>(
   if (effort === "project" || effort === "batch") return recipe;
   if (pastaGrams(recipe) != null) return recipe;
   let steps = recipe.steps.slice().sort((a, b) => a.order - b.order);
-  if (steps.length <= WEEKNIGHT_MAX_STEPS) return recipe;
+  const max = 4;
+  if (steps.length <= max) return recipe;
 
-  while (steps.length > WEEKNIGHT_MAX_STEPS) {
-    const idx = [...steps.keys()]
-      .reverse()
-      .find(
-        (i) =>
-          i > 0 &&
-          actionKind(steps[i].instruction) !== "boil-pasta" &&
-          actionKind(steps[i - 1].instruction) !== "boil-pasta"
-      );
+  const droppable = (instruction: string) =>
+    isGreensSentence(instruction) || isRedundantAssemble(instruction);
+
+  while (steps.length > max) {
+    const idx = [...steps.keys()].reverse().find((i) => droppable(steps[i].instruction));
     if (idx == null) break;
-    steps[idx - 1] = {
-      ...steps[idx - 1],
-      instruction: richerInstruction(
-        steps[idx - 1].instruction,
-        steps[idx].instruction
-      ),
-    };
     steps.splice(idx, 1);
   }
 
@@ -1077,12 +1491,15 @@ export function repairCookMethod<T extends GourmetRecipe>(
   let next = resolveStarchIdentity(recipe);
   next = scrubOffPlateFoods(next);
   next = bloomAlliumsBeforeColdDairy(next);
-  next = rebuildPastaMethod(next);
+  next = rebuildPastaMethod(next, opts?.effort);
+  next = rebuildToastMethod(next, opts?.effort);
+  next = rebuildReheatMethod(next);
+  next = rebuildSimmerMethod(next, opts?.effort);
   next = completeReservedLiquids(next);
   next = collapseDuplicateActions(next);
   next = applyMethodRoles(next);
   next = collapseDuplicateActions(next);
   next = protectColdEmulsion(next);
   next = packWeeknightSteps(next, opts?.effort);
-  return next;
+  return dropBlenderIfUnused(next);
 }

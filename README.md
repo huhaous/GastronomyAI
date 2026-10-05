@@ -8,9 +8,10 @@ Michelin Dark / Nordic Minimalist MVP bridging molecular culinary technique with
 
 - **Next.js 16** (App Router) · React · TypeScript · Tailwind CSS v4
 - **Local LLM (default)**: [Ollama](https://ollama.com) + **Qwen2.5 14B** on NVIDIA GPU (OpenAI-compatible API)
-- **Cloud LLM (optional)**: OpenAI Structured Outputs (`gpt-4o`) via `LLM_PROVIDER=openai`
+- **Cloud LLM (Path A)**: OpenAI Structured Outputs (`gpt-4o`) via `LLM_PROVIDER=openai`
+- **Site lock**: `SITE_PASSWORD` (required in production)
 - **Zod** request validation
-- **Supabase** ready via `.env.example` (Auth / Postgres / Edge — next iteration)
+- **Supabase** env slots only (Auth / Postgres — Path B)
 
 ## Local LLM (recommended for MVP)
 
@@ -37,7 +38,29 @@ ollama serve &               # terminal 1
 npm run dev                  # terminal 2
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). Local `next dev` is the research lab (Generate, 32B/14B, PSMF).
+
+## Path A — hosted coach URL
+
+The PT-facing surface is OpenAI + a site password. Production hides Generate, model chips, and PSMF.
+
+1. Create an OpenAI project, turn on billing, copy a key.
+2. In `.env.local` (and later Vercel env):
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+SITE_PASSWORD=choose-a-long-secret
+```
+
+3. Confirm Elevate on localhost against OpenAI before deploying.
+4. `npx vercel` (or connect the GitHub repo). Set the same env vars on the project. Production is coach Studio automatically.
+5. Send the PT the URL and `SITE_PASSWORD`. First-week menu is in `docs/STATUS-AND-ROADMAP.md`.
+
+Route handlers cap at 60 seconds (Vercel Hobby). GPT-4o is usually inside a minute. Raise `maxDuration` on Pro if a call dies early.
+
+Plates still live in **the PT's browser**. Clearing site data deletes the kitchen.
 
 ## API
 

@@ -1,7 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  outputFileTracingExcludes: {
+    "/api/*": [
+      ".env.local",
+      ".env*.local",
+      "last-recipe*",
+      "var/**/*",
+    ],
+  },
 };
 
 export default nextConfig;

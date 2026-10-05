@@ -94,6 +94,8 @@ export interface ScalingProblem {
   target: Partial<MacroProfile>;
   /** Per-problem overrides, e.g. a fat ceiling derived from the target itself. */
   bounds?: Partial<Record<ScaleGroup, { min?: number; max?: number }>>;
+  /** Strategy fat share of energy. Applied to the predicted plate, not a fixed gram target. */
+  fatMaxPercent?: number;
 }
 
 /**
@@ -108,6 +110,17 @@ export function fatCeilingFor(
 ): number | undefined {
   if (!targetFatGrams || fatGroupFatGrams <= 0) return undefined;
   return Math.min(4, Math.max(1, targetFatGrams / fatGroupFatGrams));
+}
+
+/** Strategy fat % of energy, as grams the solver may not exceed. */
+export function fatGramCeiling(
+  calories: number,
+  fatMaxPercent: number | undefined
+): number | undefined {
+  if (!(calories > 0) || fatMaxPercent == null || fatMaxPercent <= 0) {
+    return undefined;
+  }
+  return (calories * fatMaxPercent) / 900;
 }
 
 export interface ScalingSolution {
@@ -152,6 +165,7 @@ export function solveScaling({
   groups,
   target,
   bounds: overrides,
+  fatMaxPercent,
 }: ScalingProblem): ScalingSolution {
   const boundsFor = (group: ScaleGroup) => ({
     ...GROUP_BOUNDS[group],
@@ -202,6 +216,38 @@ export function solveScaling({
     }
 
     if (moved < 0.001) break;
+  }
+
+  const cap = target.calories && target.calories > 0 ? target.calories : undefined;
+  if (cap) {
+    for (const group of ["carb", "fat"] as ScaleGroup[]) {
+      if (!groups[group]) continue;
+      const predicted = combine(base, groups, factors);
+      if (predicted.calories <= cap) break;
+      const own = groups[group]!;
+      if (own.calories <= 0) continue;
+      const others = combine(base, groups, { ...factors, [group]: 0 });
+      const needed = (cap - others.calories) / own.calories;
+      const bounds = boundsFor(group);
+      factors[group] = Math.min(
+        factors[group] ?? 1,
+        Math.max(bounds.min, needed)
+      );
+    }
+  }
+
+  if (fatMaxPercent && fatMaxPercent > 0 && groups.fat) {
+    for (let pass = 0; pass < 4; pass += 1) {
+      const predicted = combine(base, groups, factors);
+      const capG = (predicted.calories * fatMaxPercent) / 900;
+      if (predicted.fat_g <= capG + 0.05) break;
+      const own = groups.fat;
+      if (own.fat_g <= 0) break;
+      const others = combine(base, groups, { ...factors, fat: 0 });
+      const needed = (capG - others.fat_g) / own.fat_g;
+      const bounds = boundsFor("fat");
+      factors.fat = Math.min(factors.fat ?? 1, Math.max(bounds.min, needed));
+    }
   }
 
   const clamped = active.filter((group) => {

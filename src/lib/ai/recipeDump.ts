@@ -73,13 +73,13 @@ function toMarkdown(recipe: GourmetRecipe, context: { mode: string; craving?: st
 /** Keep last-recipe3 ← last-recipe2 ← last-recipe1 ← last-recipe. */
 function rotateRecipeDump(dir: string, stem: string): void {
   for (const ext of [".md", ".json"] as const) {
-    const current = join(dir, `${stem}${ext}`);
+    const current = join(/*turbopackIgnore: true*/ dir, `${stem}${ext}`);
     const first = join(dir, `${stem}1${ext}`);
     const second = join(dir, `${stem}2${ext}`);
     const third = join(dir, `${stem}3${ext}`);
     if (existsSync(second)) copyFileSync(second, third);
     if (existsSync(first)) copyFileSync(first, second);
-    if (existsSync(current)) copyFileSync(current, first);
+    if (existsSync(/*turbopackIgnore: true*/ current)) copyFileSync(current, first);
   }
 }
 
@@ -88,6 +88,7 @@ export function dumpLastRecipe(
   context: { mode: string; craving?: string }
 ): void {
   if (typeof window !== "undefined") return;
+  if (process.env.NODE_ENV === "production") return;
   if (process.env.SKIP_RECIPE_DUMP === "1") return;
 
   const payload = {

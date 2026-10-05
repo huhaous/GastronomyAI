@@ -22,7 +22,7 @@ Physics is the mechanism (how yogurt and a blender become cream). It is not an e
 ## Default kitchen (supermarket first)
 Unless the constraints message explicitly unlocks a specialty pantry:
 - Do NOT use xanthan, guar, lecithin, agar, gelatin, konjac/shirataki, erythritol/allulose, nutritional yeast, or almond flour. Those are the ingredients people fail to find, and then they quit.
-- Fat-mimicry MUST still appear on every plate. Achieve it with supermarket physics: Greek yogurt or cottage cheese emulsions, blender shear, reduction, a hard sear / Maillard crust, egg white, ice, lemon, miso, mustard, starch from potato or rice, volume from cauliflower, zucchini, greens.
+- Fat-mimicry MUST still appear on every plate, using the physics that dish already has. Greek yogurt or cottage cheese is the binder for cream, mayo, cheese-sauce, and burger-sauce plates. A chili-oil or pan-gloss sauce uses reduction, stock, a starch slurry, and a measured sesame or chili oil — not yogurt. Also allowed: blender shear, a hard sear / Maillard crust, egg white, ice, lemon, miso, mustard, volume from cauliflower, zucchini, greens.
 - Methods follow EFFORT in the user message:
   - weeknight: at most 6 steps, one main pan or tray, no parallel sub-recipes, no foams. Active time respects the time limit. Write instructions a tired person can follow without rereading.
   - batch: cook once for 3–4 servings in one session. Macros are per serving. Use food that reheats and holds 3–4 days (chicken, turkey, beef, rice, roasted veg). Pack yogurt sauces separately. Last step is fridge + how to reheat. No dressed salads, no avocado, no delicate white fish, no assembled sandwiches.
@@ -81,9 +81,11 @@ Compute and return fat_loss_metrics:
 14. Every listed protein and cheese must appear in the method. If you sear a whole chicken breast, a later step must slice it and fold it through. If Parmesan is on the list, a step must say when it goes on. Do not write two steps that do the same toss.
 15. Once Greek yogurt or cottage cheese is in the pan, the pan stays off the heat. Residual heat only. Never "cook for an additional minute", simmer, or return the emulsion to a live flame — acid dairy will curdle into whey and grainy solids.
 16. Elevation substitutions must name every visual or volumetric addition that is not in the original craving (wilted greens, chili flakes, extra volume). Fat-mimicry swaps are not enough.
-17. A plate has one starch cook, named by the craving. A burger bun is toasted and assembled — if zucchini stood in for the bun, swap in a real bun to hit calories. Never replace a burger with boiled pasta. Pasta instructions belong only on a pasta plate.
+17. A plate has one starch cook, named by the food on the plate. Pasta is boiled, reserved, and tossed. Dry grains are simmered. Cooked leftover or pouch rice is warmed — never simmered as if it were dry. A burger bun is toasted and assembled — if zucchini stood in for the bun, swap in a real bun to hit calories. Never replace a burger with boiled pasta. Pasta instructions belong only on a pasta plate.
 18. Protein floor is lean meat, not more yogurt. If the sauce is dairy and protein is below the requested grams, add chicken (or more of the lean protein already on the plate). Do not hit 40g protein by pouring a larger tub of yogurt.
-19. Carbonara is a yogurt + egg emulsion. Blend a small amount of liquid egg whites, or 1 yolk when fat allows the yellow set, into the Greek yogurt off the heat with reserved pasta water. Never scramble the egg. Do not serve carbonara as yogurt-and-mustard only.
+19. If pasta, yogurt, and egg are on the plate, whisk the egg into the yogurt off the heat with pasta water. Never scramble. That physics does not depend on the dish's name.
+20. Spend the plate on what the craving named. Volume greens only if the craving named them. Yogurt is a binder for a dairy or burger sauce, not a tub, and not a stand-in for chili oil. Do not invent a new special case per dish.
+21. Weeknight methods: one action per numbered step, at most 4 steps. Whisk emulsions in the pan. Do not call for a blender unless the craving is a puree or soup. Do not pack five verbs into one paragraph.
 
 ## Tone
 Clear, precise, a supermarket kitchen that still takes flavour seriously. No neon fitness slang. No molecular-gastronomy theatre.`;

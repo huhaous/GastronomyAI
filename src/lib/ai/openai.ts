@@ -12,12 +12,11 @@ import { buildKnowledgeGraphConstraints } from "@/lib/ai/graphContext";
 import { applyGraphRecalculation } from "@/lib/ai/nutritionRecalc";
 import { adjustPortions, rebalanceProteinForStrategy } from "@/lib/ai/portionAdjust";
 import { announcePlateAdditions } from "@/lib/ai/elevationNotes";
-import { dumpLastRecipe } from "@/lib/ai/recipeDump";
 import { validateAgainstStrategy } from "@/lib/ai/strategyValidation";
 import { suggestGapFillers, applyGapFill, cookDisplayName } from "@/lib/nutrition/gapFill";
 import { repairPieceQuantities } from "@/lib/nutrition/foodLines";
 import { validateCookability } from "@/lib/cookability";
-import { ensureCarbonaraEmulsion } from "@/lib/cook/carbonaraEmulsion";
+import { applySignaturePlate } from "@/lib/cook/signaturePlate";
 import { repairCookMethod } from "@/lib/cook/methodIntegrity";
 import { recordCoverage } from "@/lib/telemetry/coverageLog";
 import type {
@@ -45,6 +44,12 @@ function getClient(modelOverride?: string): {
     model: config.model,
     useStrictJsonSchema: config.useStrictJsonSchema,
   };
+}
+
+/** gpt-5 / o-series only accept the default temperature. */
+function sampling(model: string): { temperature?: number } {
+  if (/^gpt-5/i.test(model) || /^o[0-9]/i.test(model)) return {};
+  return { temperature: 0.7 };
 }
 
 function strategyGuidance(id?: string): string | undefined {
@@ -101,7 +106,7 @@ function finalizeRecipe<T extends GourmetRecipe>(
     ("original_craving" in incoming
       ? String((incoming as { original_craving?: string }).original_craving ?? "")
       : "");
-  const raw = ensureCarbonaraEmulsion(repairPieceQuantities(incoming), {
+  const raw = applySignaturePlate(repairPieceQuantities(incoming), {
     craving: cravingEarly || undefined,
     targetCalories: context.target?.calories,
   });
@@ -231,10 +236,14 @@ function finalizeRecipe<T extends GourmetRecipe>(
     gap_suggestions: gapSuggestions.length > 0 ? gapSuggestions : undefined,
     cookability: cookability.violations.length > 0 ? cookability : undefined,
   };
-  dumpLastRecipe(finalized, {
-    mode: context.mode,
-    craving: craving || undefined,
-  });
+  if (process.env.NODE_ENV !== "production") {
+    void import("@/lib/ai/recipeDump").then((mod) =>
+      mod.dumpLastRecipe(finalized, {
+        mode: context.mode,
+        craving: craving || undefined,
+      })
+    );
+  }
   return finalized;
 }
 
@@ -309,7 +318,7 @@ export async function generateGourmetRecipe(
 
   const completion = await client.chat.completions.create({
     model,
-    temperature: 0.7,
+    ...sampling(model),
     response_format: responseFormat(useStrictJsonSchema, GOURMET_RECIPE_JSON_SCHEMA),
     messages: [...systemMessages, { role: "user", content: userPrompt }],
   });
@@ -360,7 +369,7 @@ export async function elevateCravingRecipe(
 
   const completion = await client.chat.completions.create({
     model,
-    temperature: 0.7,
+    ...sampling(model),
     response_format: responseFormat(useStrictJsonSchema, ELEVATED_RECIPE_JSON_SCHEMA),
     messages: [...systemMessages, { role: "user", content: userPrompt }],
   });
