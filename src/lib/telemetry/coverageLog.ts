@@ -12,6 +12,7 @@
  * request.
  */
 
+import { after } from "next/server";
 import { selectSink, type CoverageSink } from "@/lib/telemetry/coverageSink";
 import type { UnresolvedLine } from "@/lib/nutrition/foodLines";
 import type { MacroConfidence, NutritionalStrategy } from "@/types/nutrition";
@@ -65,9 +66,27 @@ async function write(record: CoverageRecord): Promise<void> {
   }
 }
 
+/**
+ * A serverless function is frozen the moment it sends its response, so a bare
+ * floating promise is not slow — it is lost. The first hosted generation
+ * selected the blob sink, wrote nothing, and reported no failure, because the
+ * upload was still in flight when the invocation ended.
+ *
+ * after() holds the invocation open until the write lands. Outside a request
+ * there is nothing to freeze and nothing to hold, so fall back to the floating
+ * promise: a laptop's file append finishes on its own.
+ */
+function schedule(work: Promise<void>): void {
+  try {
+    after(work);
+  } catch {
+    void work;
+  }
+}
+
 /** Fire-and-forget: the caller is a request path and must not wait on a sink. */
 export function recordCoverage(record: CoverageRecord): void {
-  void write(record);
+  schedule(write(record));
 }
 
 /** Tests only: forget the memoized sink so env changes take effect. */

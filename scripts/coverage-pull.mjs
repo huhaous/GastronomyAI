@@ -21,7 +21,7 @@ import { get, list } from "@vercel/blob";
 const ROOT = resolve(import.meta.dirname, "..");
 const OUT = resolve(ROOT, "var", "coverage-prod.jsonl");
 
-function tokenFromEnvLocal() {
+function fromEnvLocal(key) {
   try {
     const raw = readFileSync(resolve(ROOT, ".env.local"), "utf8");
     for (const line of raw.split(/\r?\n/)) {
@@ -29,7 +29,7 @@ function tokenFromEnvLocal() {
       if (!trimmed || trimmed.startsWith("#")) continue;
       const eq = trimmed.indexOf("=");
       if (eq <= 0) continue;
-      if (trimmed.slice(0, eq).trim() !== "BLOB_READ_WRITE_TOKEN") continue;
+      if (trimmed.slice(0, eq).trim() !== key) continue;
       return trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
     }
   } catch {
@@ -38,10 +38,35 @@ function tokenFromEnvLocal() {
   return undefined;
 }
 
-const token = process.env.BLOB_READ_WRITE_TOKEN || tokenFromEnvLocal();
-if (!token) {
+function pick(key) {
+  return process.env[key] || fromEnvLocal(key);
+}
+
+/**
+ * Two ways in, because connecting a store to a project sets up OIDC and never
+ * issues a static token. OIDC rotates and is preferred; the read-write token is
+ * the fallback for a laptop the project does not trust.
+ */
+const rwToken = pick("BLOB_READ_WRITE_TOKEN");
+const oidcToken = pick("VERCEL_OIDC_TOKEN");
+const storeId = pick("BLOB_STORE_ID");
+
+const auth = rwToken
+  ? { token: rwToken }
+  : oidcToken && storeId
+    ? { oidcToken, storeId }
+    : undefined;
+
+if (!auth) {
   console.error(
-    "No BLOB_READ_WRITE_TOKEN. Add it to .env.local (Vercel → Storage → your Blob store → tokens)."
+    [
+      "No Blob credentials. Either works, in .env.local or the environment:",
+      "",
+      "  BLOB_READ_WRITE_TOKEN   a static token from the store's dashboard page",
+      "  VERCEL_OIDC_TOKEN + BLOB_STORE_ID",
+      "      vercel env pull /tmp/oidc.env --environment=development",
+      "      (needs the store connected to Development, not just Production)",
+    ].join("\n")
   );
   process.exit(1);
 }
@@ -51,7 +76,7 @@ const prefix = since ? `coverage/${since}` : "coverage/";
 
 /** get() hands back a stream; normalize the shapes it can arrive in. */
 async function readBlob(pathname) {
-  const found = await get(pathname, { access: "private", token });
+  const found = await get(pathname, { access: "private", ...auth });
   if (!found) return undefined;
   if (typeof found.text === "function") return found.text();
   const body = found.stream ?? found.body ?? found;
@@ -61,7 +86,7 @@ async function readBlob(pathname) {
 const pathnames = [];
 let cursor;
 do {
-  const page = await list({ token, prefix, cursor, limit: 1000 });
+  const page = await list({ ...auth, prefix, cursor, limit: 1000 });
   for (const blob of page.blobs) pathnames.push(blob.pathname);
   cursor = page.hasMore ? page.cursor : undefined;
 } while (cursor);
