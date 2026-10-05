@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "npx tsx scripts/method-scrub-smoke.ts && npx tsx scripts/method-integrity-smoke.ts && npx tsx scripts/portion-adjust-smoke.ts && npx tsx scripts/gap-fill-smoke.ts && npx tsx scripts/cookability-smoke.ts && npx tsx scripts/llm-config-smoke.ts && npx tsx scripts/coverage-log-smoke.ts",
+    "test": "npx tsx scripts/method-scrub-smoke.ts && npx tsx scripts/method-integrity-smoke.ts && npx tsx scripts/portion-adjust-smoke.ts && npx tsx scripts/gap-fill-smoke.ts && npx tsx scripts/cookability-smoke.ts && npx tsx scripts/llm-config-smoke.ts && npx tsx scripts/coverage-log-smoke.ts && npx tsx scripts/graph-match-smoke.ts",
     "coverage": "node scripts/coverage-report.mjs",
     "coverage:pull": "node scripts/coverage-pull.mjs",
     "coverage:seed": "node scripts/coverage-seed.mjs",

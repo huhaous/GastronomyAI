@@ -440,6 +440,24 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     flavorPairs: ["ginger", "soy sauce", "scallion"],
     gramsPer: { tsp: 4.5, tbsp: 13.6 },
   },
+  // Macro-identical to olive oil, but not an alias of it: a curry is cooked in
+  // a neutral oil on purpose, and olive's flavorPairs would argue otherwise.
+  "neutral-oil": {
+    name: "Neutral Oil",
+    aliases: [
+      "canola oil",
+      "rapeseed oil",
+      "vegetable oil",
+      "sunflower oil",
+      "grapeseed oil",
+      "avocado oil",
+    ],
+    macroPer100g: { calories: 884, protein_g: 0, carbs_g: 0, fat_g: 100 },
+    satietyScore: 2,
+    substitutionFor: ["butter"],
+    flavorPairs: ["onion", "ginger", "cumin"],
+    gramsPer: { tsp: 4.5, tbsp: 13.5 },
+  },
   butter: {
     name: "Butter",
     aliases: ["unsalted butter", "salted butter"],
@@ -811,6 +829,17 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     flavorPairs: ["basil", "garlic", "oregano"],
     gramsPer: { tsp: 5.3, tbsp: 16 },
   },
+  // Its own node rather than an alias of paste: passata is strained, not
+  // concentrated, and pricing 130g of it as paste would invent ~65 kcal.
+  "tomato-passata": {
+    name: "Tomato Passata",
+    aliases: ["passata", "strained tomatoes", "tomato sauce", "crushed tomatoes"],
+    macroPer100g: { calories: 32, protein_g: 1.3, carbs_g: 6.5, fat_g: 0.2 },
+    satietyScore: 5,
+    substitutionFor: [],
+    flavorPairs: ["basil", "garlic", "onion"],
+    gramsPer: { tbsp: 16, cup: 245 },
+  },
   "nutritional-yeast": {
     name: "Nutritional Yeast",
     availability: "specialty",
@@ -1113,6 +1142,7 @@ export const NEGLIGIBLE_SEASONINGS: string[] = [
   "dill", "chives", "mint", "tarragon", "bay leaf", "sage", "marjoram",
   "vanilla extract", "almond extract", "lemon zest", "lime zest", "orange zest",
   "garlic powder", "onion powder", "curry powder", "garam masala",
+  "masala", "tikka masala", "jerk", "harissa", "ras el hanout",
   "five spice", "za'atar", "sumac", "saffron", "furikake", "kombu",
   "stevia", "monk fruit", "water", "ice", "cooking spray", "oil spray",
   "baking powder", "baking soda", "mustard powder", "espresso powder",
@@ -1408,6 +1438,12 @@ const MATCH_QUALIFIERS = new Set([
   "leftover",
   "jasmine",
   "basmati",
+  "fine",
+  // A spice blend is named by what is in it, not by the word "blend".
+  "spice",
+  "blend",
+  "seasoning",
+  "mix",
 ]);
 
 /**
@@ -1436,6 +1472,37 @@ function leftoverContent(longer: string, shorter: string): string[] {
     );
 }
 
+/**
+ * Words that name a cook, not a wording. These are listed as qualifiers so the
+ * phrase path can see past them at an edge ("dry white rice" is rice), but
+ * order-free matching must treat them as content: dry rice is 365 kcal/100g
+ * and cooked rice is 130, so letting "cooked" fall away would answer a dry
+ * grain with a cooked one and understate the line by nearly threefold —
+ * worse than not matching at all.
+ */
+const COOK_STATE = new Set(["cooked", "leftover", "pouch", "microwave", "dry", "raw", "frozen"]);
+
+/** The words that decide which food this is, once wording is dropped. */
+function contentTokens(text: string): string[] {
+  return text
+    .split(/\s+/)
+    .filter(
+      (token) =>
+        token.length >= 3 && (COOK_STATE.has(token) || !MATCH_QUALIFIERS.has(token))
+    );
+}
+
+function sameContent(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const pool = [...right];
+  for (const token of left) {
+    const at = pool.findIndex((other) => sameToken(token, other));
+    if (at < 0) return false;
+    pool.splice(at, 1);
+  }
+  return true;
+}
+
 function looseMatch(query: string, candidate: string): boolean {
   if (phraseMatch(query, candidate)) {
     return leftoverContent(query, candidate).length === 0;
@@ -1443,7 +1510,15 @@ function looseMatch(query: string, candidate: string): boolean {
   if (phraseMatch(candidate, query)) {
     return leftoverContent(candidate, query).length === 0;
   }
-  return false;
+  // A qualifier only ever worked at an edge. "cooked basmati rice" is not a
+  // contiguous phrase inside "cooked white basmati rice" — the adjective sits
+  // in the middle — so the phrase gate rejected the line before any qualifier
+  // was read, and 90g of rice went unpriced on a live plate. Compare the
+  // content words instead, in any order. "spaghetti" still cannot claim
+  // "spaghetti squash", because squash is content, not a qualifier.
+  const asked = contentTokens(query);
+  if (asked.length === 0) return false;
+  return sameContent(asked, contentTokens(candidate));
 }
 
 function queryWantsCookedStarch(q: string): boolean {
