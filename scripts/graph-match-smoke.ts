@@ -61,6 +61,53 @@ assert(
   "passata is the lighter of the two"
 );
 
+// --- the taco and cheeseburger backlog -----------------------------------
+// One chicken tacos plate reported 461 kcal and could only vouch for 254:
+// the tortilla, the salsa, the cabbage and the lime all went unpriced, so
+// 45% of the energy on the card rested on nothing the graph had seen.
+resolves("corn tortillas", "corn-tortilla");
+resolves("tomato salsa", "salsa");
+resolves("shredded cabbage", "green-cabbage");
+resolves("lime juice", "lime-juice");
+// A cheeseburger lost only one line — but one line is enough to drop a whole
+// plate from verified to estimated.
+resolves("iceberg lettuce", "iceberg-lettuce");
+resolves("shredded iceberg", "iceberg-lettuce");
+
+// Iceberg is denser shredded than loose leaves are. Reading a cup of it off
+// the mixed-greens node would have understated the line by well over double.
+const iceberg = findIngredientNode("iceberg lettuce");
+const greens = findIngredientNode("mixed greens");
+assert(
+  iceberg?.key !== greens?.key,
+  "iceberg keeps its own node rather than borrowing mixed greens"
+);
+assert(
+  (iceberg?.gramsPer?.cup ?? 0) > (greens?.gramsPer?.cup ?? 0),
+  "a cup of shredded iceberg weighs more than a cup of loose greens"
+);
+
+// Plain "lettuce" is still the mixed-greens node, and a lime wedge is still
+// a garnish worth zero calories — neither new node may swallow them.
+resolves("lettuce", "mixed-greens");
+assert(
+  findIngredientNode("lime wedge")?.negligible === true,
+  "a lime wedge stays a negligible garnish"
+);
+
+// --- how the supermarket writes it ---------------------------------------
+// Re-running the same taco craving after the nodes above landed produced a
+// second, more telling failure: every missing line was a food the graph
+// already held, described by its packet. 250g of chicken breast went
+// unpriced because the line called it "raw chicken breast strips".
+resolves("raw chicken breast strips", "chicken-breast");
+resolves("bagged shredded red cabbage", "green-cabbage");
+resolves("pre-diced red onion", "onion");
+assert(
+  findIngredientNode("taco seasoning blend")?.negligible === true,
+  '"taco seasoning blend" is a negligible seasoning'
+);
+
 // --- the invariants the looser matcher must not break ---------------------
 const squash = findIngredientNode("spaghetti squash");
 const spaghetti = findIngredientNode("spaghetti");

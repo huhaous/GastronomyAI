@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Build output from `scripts/vercel-path-a-deploy.mjs`. Bundled and
+    // minified, so it reports errors no one can act on.
+    ".vercel/**",
   ]),
 ]);
 

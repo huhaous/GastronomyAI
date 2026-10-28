@@ -107,7 +107,7 @@ export interface IngredientNode {
      * Same carb vehicle at a different cook (dry rice vs leftover rice).
      * Off-plate scrub must not treat one as a stray when the other is listed.
      */
-    starchFamily?: "rice" | "pasta" | "quinoa" | "bun";
+    starchFamily?: "rice" | "pasta" | "quinoa" | "bun" | "tortilla";
     /**
      * The model writes "1" bun as "1g". Treat small integers as piece counts,
      * not grams — chicken breasts are weighed, buns are counted.
@@ -384,6 +384,16 @@ export const INGREDIENT_GRAPH: Record<string, IngredientNode> = {
     flavorPairs: ["thyme", "garlic", "dill", "black pepper"],
     /** `piece` = juice of one lemon. */
     gramsPer: { tsp: 5, tbsp: 15, piece: 45 },
+  },
+  "lime-juice": {
+    name: "Lime Juice",
+    aliases: ["lime", "fresh lime juice"],
+    macroPer100g: { calories: 25, protein_g: 0.4, carbs_g: 8.4, fat_g: 0.1 },
+    satietyScore: 3,
+    substitutionFor: ["salt (brightness)", "sugar (acid balance)"],
+    flavorPairs: ["cilantro", "chili", "garlic", "cumin"],
+    /** `piece` = juice of one lime, which runs smaller than a lemon. */
+    gramsPer: { tsp: 5, tbsp: 15, piece: 30 },
   },
   "sweet-potato": {
     name: "Sweet Potato",
@@ -1080,6 +1090,38 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     storage: "same_day",
     handling: { elevationRole: "volume", countAsPiece: true, methodRole: "assemble" },
   },
+  "iceberg-lettuce": {
+    name: "Iceberg Lettuce",
+    aliases: ["iceberg", "shredded iceberg", "shredded lettuce", "crisp lettuce"],
+    macroPer100g: { calories: 14, protein_g: 0.9, carbs_g: 3, fat_g: 0.1 },
+    satietyScore: 4,
+    substitutionFor: ["mayo-dressed slaw", "extra cheese (as bulk)"],
+    flavorPairs: ["pickle", "mustard", "tomato", "onion"],
+    /** A shredded cup packs far denser than the loose leaves of mixed greens. */
+    gramsPer: { cup: 72, piece: 8 },
+    storage: "same_day",
+    handling: { elevationRole: "volume", methodRole: "assemble" },
+  },
+  "green-cabbage": {
+    name: "Green Cabbage",
+    aliases: ["cabbage", "shredded cabbage", "white cabbage", "slaw mix", "coleslaw mix"],
+    macroPer100g: { calories: 25, protein_g: 1.3, carbs_g: 5.8, fat_g: 0.1 },
+    satietyScore: 6,
+    substitutionFor: ["tortilla (as bulk)", "noodles (as bulk)"],
+    flavorPairs: ["lime", "cilantro", "cumin", "chili"],
+    gramsPer: { cup: 89 },
+    handling: { elevationRole: "volume", methodRole: "assemble" },
+  },
+  salsa: {
+    name: "Tomato Salsa",
+    aliases: ["tomato salsa", "pico de gallo", "salsa roja", "jarred salsa"],
+    macroPer100g: { calories: 36, protein_g: 1.5, carbs_g: 7.2, fat_g: 0.2 },
+    satietyScore: 4,
+    substitutionFor: ["sour cream", "guacamole", "cheese sauce"],
+    flavorPairs: ["lime", "cilantro", "cumin", "onion"],
+    gramsPer: { tbsp: 16, cup: 260 },
+    handling: { methodRole: "finish" },
+  },
   chickpeas: {
     name: "Chickpeas (cooked)",
     aliases: ["garbanzo beans", "cooked chickpeas", "canned chickpeas"],
@@ -1126,6 +1168,20 @@ export const PANTRY_GRAPH: Record<string, IngredientNode> = {
     storage: "same_day",
     handling: { starchCook: "toast_assemble", countAsPiece: true, starchFamily: "bun" },
   },
+  "corn-tortilla": {
+    name: "Corn Tortilla",
+    aliases: ["corn tortillas", "tortilla", "tortillas", "street taco tortilla"],
+    macroPer100g: { calories: 218, protein_g: 5.7, carbs_g: 44.6, fat_g: 2.9 },
+    satietyScore: 5,
+    substitutionFor: ["flour tortilla", "hard taco shell"],
+    flavorPairs: ["lime", "cilantro", "cumin", "chili"],
+    gramsPer: { piece: 24 },
+    handling: {
+      starchCook: "toast_assemble",
+      countAsPiece: true,
+      starchFamily: "tortilla",
+    },
+  },
 };
 
 /**
@@ -1143,6 +1199,7 @@ export const NEGLIGIBLE_SEASONINGS: string[] = [
   "vanilla extract", "almond extract", "lemon zest", "lime zest", "orange zest",
   "garlic powder", "onion powder", "curry powder", "garam masala",
   "masala", "tikka masala", "jerk", "harissa", "ras el hanout",
+  "taco seasoning", "fajita seasoning", "cajun seasoning", "italian seasoning",
   "five spice", "za'atar", "sumac", "saffron", "furikake", "kombu",
   "stevia", "monk fruit", "water", "ice", "cooking spray", "oil spray",
   "baking powder", "baking soda", "mustard powder", "espresso powder",
@@ -1444,6 +1501,20 @@ const MATCH_QUALIFIERS = new Set([
   "blend",
   "seasoning",
   "mix",
+  // How the supermarket sold it and how it was cut. A plate asking for
+  // "bagged shredded red cabbage" and "pre-diced red onion" left 80g
+  // unpriced against a graph that holds both foods: the words describe the
+  // packet, not the food inside it.
+  "bagged",
+  "pre",
+  "diced",
+  "shredded",
+  "grated",
+  "crumbled",
+  "strip",
+  "strips",
+  "cubed",
+  "trimmed",
 ]);
 
 /**
