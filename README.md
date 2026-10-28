@@ -1,127 +1,160 @@
 # GastronomyAI
 
-Zero-willpower fat loss through gourmet culinary physics.
+Ask for a cheeseburger at 480 kcal and 40g protein. Get a real recipe whose
+numbers are checked against a food graph rather than taken from the model.
 
-Michelin Dark / Nordic Minimalist MVP bridging molecular culinary technique with strict macronutrient targets.
+This is a study in one problem: **a language model will hand you a finished,
+plausible, confidently wrong answer, and nothing in the output tells you
+which parts it actually knew.** Recipes make that problem concrete, because
+the model's mistakes are numeric and a diner acts on them.
 
-## Stack
+Live, password-gated. Next.js 16 · TypeScript · OpenAI structured outputs.
 
-- **Next.js 16** (App Router) · React · TypeScript · Tailwind CSS v4
-- **Local LLM (default)**: [Ollama](https://ollama.com) + **Qwen2.5 14B** on NVIDIA GPU (OpenAI-compatible API)
-- **Cloud LLM (Path A)**: OpenAI Structured Outputs (`gpt-4o`) via `LLM_PROVIDER=openai`
-- **Site lock**: `SITE_PASSWORD` (required in production)
-- **Zod** request validation
-- **Supabase** env slots only (Auth / Postgres — Path B)
+## The failure this is built around
 
-## Local LLM (recommended for MVP)
+An early hosted plate reported **478 kcal**. The graph could only vouch for
+**268**. The card looked finished — no error, nothing a careful reader would
+catch — and 44% of the stated energy was the model's own arithmetic.
 
-Your machine (RTX 5090 Laptop · 24GB VRAM) is already wired as the default provider.
+That is the whole thesis. Generation is the easy half. Knowing which half of
+the output is grounded, and saying so, is the part that needs engineering.
 
-```bash
-# Ollama is installed at ~/.local/bin/ollama
-export PATH="$HOME/.local/bin:$PATH"
-ollama serve          # keep this running
-# models: qwen2.5:32b (default quality) + qwen2.5:14b (fast fallback)
+## How it works
+
+Three stages, and the model only owns the first.
+
+**1. Generate.** A prompt built from the graph asks for JSON constrained by a
+schema (`response_format: json_schema`, then Zod). The model proposes a dish,
+ingredient lines, and a method.
+
+**2. Price it against the graph.** Every ingredient line is resolved to a node
+in `src/data/knowledgeGraph.ts` — 87 food nodes plus 76 negligible seasonings —
+and re-costed from grams. The model's claimed macros are discarded in favour of
+what the graph can actually vouch for. Lines that resolve to nothing are
+recorded, not quietly dropped.
+
+**3. Post-check and repair.** Deterministic passes fix what the model reliably
+gets wrong: portions are solved against the calorie ceiling and protein floor
+(`portionScaling.ts`), and the method is recompiled so it describes the plate
+that is actually listed (`methodIntegrity.ts`).
+
+Each ingredient carries physics rather than a dish name — `starchCook`,
+`methodRole`, `saucePhysics` — so a new cook is a field on a node, never a
+`handleCarbonara()`. That rule is written down and enforced in
+[`.cursor/skills/graph-physics/SKILL.md`](.cursor/skills/graph-physics/SKILL.md),
+because the tempting fix is always a regex for the dish that just broke.
+
+## Saying how much it knew
+
+Every plate carries a confidence — `verified`, `partial`, `unverified` — from
+whether all, some, or few of its lines resolved. The UI shows it. A plate the
+graph cannot fully price says so on the card instead of presenting a confident
+number.
+
+Every generation also writes a record: the craving, the dish, verified versus
+reported calories, and each unresolved line with a reason.
+
+```
+Coverage over 3 generation(s)
+
+  fully verified   2 (67%)
+  unverified       1 (33%)
+  ingredient lines 35/40 priced (88%)
+
+Cravings that came back unverified:
+    1/2  chicken tikka masala
+
+Backlog — most frequent first:
+    1x  cooked white basmati rice  not in graph
+    1x  tomato passata             not in graph
 ```
 
-App defaults (`LLM_PROVIDER=local`, `OLLAMA_MODEL=qwen2.5:32b`) call `http://127.0.0.1:11434/v1`.
-In Recipe Studio you can toggle **32B** (quality) vs **14B** (speed) without restarting.
+Two different signals sit in that report. The backlog names **foods the graph
+cannot price**. The craving list names **dishes the engine cannot cook**. Only
+the second one tells you the product has a hole.
 
-## Setup
+### What it caught
+
+The 478-versus-268 plate above produced five unresolved lines, which looked
+like five missing foods. Four were foods the graph already had.
+
+`looseMatch` gated on a contiguous phrase, so the alias `cooked basmati rice`
+could not be found inside `cooked white basmati rice` — the adjective
+interrupts it. Qualifiers only ever worked at the *edges* of a name. One
+structural bug, not five data gaps.
+
+The first fix made it worse: dropping `cooked` as a qualifier let dry rice
+(365 kcal/100g) answer to cooked rice (130), understating the line almost
+threefold. A wrong match is worse than no match, because the system believes
+it. Cook state is now content rather than wording, and
+`scripts/graph-match-smoke.ts` pins both directions.
+
+Same craving after the fix: **16/16 lines priced, 461 kcal verified against
+461 reported.**
+
+## Where to look
+
+| | |
+|---|---|
+| `src/data/knowledgeGraph.ts` | Food nodes, cook physics, and the name matcher |
+| `src/lib/ai/openai.ts` | `finalizeRecipe` — the whole post-generation pipeline |
+| `src/lib/nutrition/portionScaling.ts` | Coordinate-descent solver for macro targets |
+| `src/lib/cook/methodIntegrity.ts` | Recompiles the method to match the plate |
+| `src/lib/telemetry/` | Coverage records, pluggable sinks, anonymous grouping |
+| `scripts/*-smoke.ts` | 56 assertions, most written from a plate that broke |
+
+The commit messages carry the reasoning; `git log` is a reasonable way to read
+this project.
+
+## Running it
 
 ```bash
-cp .env.example .env.local   # already defaults to local Ollama
-# Optional: OPENAI_API_KEY only if LLM_PROVIDER=openai
-
+cp .env.example .env.local
 npm install
-ollama serve &               # terminal 1
-npm run dev                  # terminal 2
+npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Local `next dev` is the research lab (Generate, 32B/14B, PSMF).
-
-## Path A — hosted coach URL
-
-The PT-facing surface is OpenAI + a site password. Production hides Generate, model chips, and PSMF.
-
-1. Create an OpenAI project, turn on billing, copy a key.
-2. In `.env.local` (and later Vercel env):
+Defaults to a local Ollama model, so it runs with no API key. Set
+`LLM_PROVIDER=openai` and `OPENAI_API_KEY` to use hosted models instead;
+`OPENAI_MODEL` picks the version. Local `next dev` exposes the research
+surface (Generate, model switching); production shows only Elevate.
 
 ```bash
-LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o
-SITE_PASSWORD=choose-a-long-secret
+npm test        # 8 smoke suites, no network, no API calls
+npm run lint
+npm run coverage   # graph backlog from local generations
 ```
 
-3. Confirm Elevate on localhost against OpenAI before deploying.
-4. `npx vercel` (or connect the GitHub repo). Set the same env vars on the project. Production is coach Studio automatically.
-5. Send the PT the URL and `SITE_PASSWORD`. First-week menu is in `docs/STATUS-AND-ROADMAP.md`.
+### Hosted
 
-Route handlers cap at 60 seconds (Vercel Hobby). GPT-4o is usually inside a minute. Raise `maxDuration` on Pro if a call dies early.
+`node scripts/vercel-path-a-deploy.mjs` deploys to Vercel, reading credentials
+from `.env.local` and never printing them. Production requires `SITE_PASSWORD`.
 
-Plates still live in **the PT's browser**. Clearing site data deletes the kitchen.
-
-## API
-
-### `POST /api/generate-recipe`
-
-```json
-{
-  "target_macros": { "calories": 450, "protein_g": 35, "carbs_g": 25, "fat_g": 12 },
-  "available_ingredients": ["chicken breast", "cauliflower", "lemon", "greek yogurt"],
-  "kitchen_tools": ["sous_vide", "blender", "oven"],
-  "time_limit_minutes": 60
-}
-```
-
-### `POST /api/elevate-recipe`
-
-```json
-{
-  "craving_meal": "Fettuccine Alfredo",
-  "target_macros": { "calories": 480, "protein_g": 40 },
-  "kitchen_tools": ["stovetop", "blender"],
-  "time_limit_minutes": 45
-}
-```
-
-## Graph coverage log
-
-Every generation records which ingredient lines the Knowledge Graph could price
-and why the rest failed — missing node, unparseable quantity, or unknown unit —
-alongside the craving that was typed and a random per-browser id that groups one
-person's run without identifying them.
-
-Locally this appends to `var/coverage.jsonl` (gitignored) with no setup:
-
-```bash
-npm run coverage             # ranked backlog of what to add to the graph next
-COVERAGE_LOG=off npm run dev # opt out
-```
-
-A hosted deploy has no writable disk, so the same append fails and the log
-silently switches itself off — every plate a user makes is then lost. Give it a
-**private** Blob store instead (Vercel → Storage → Blob → access: Private,
-connected to the project). Private matters: a record carries the craving the
-diner typed. With no store configured, production falls back to console logging
-so a misconfigured deploy is noisy rather than silent.
+Coverage records need somewhere durable, because a serverless filesystem is
+read-only and the write fails silently. Connect a **private** Vercel Blob store
+— private because a record contains the craving someone typed. With none
+configured, production falls back to console logging so a misconfigured deploy
+is noisy rather than silent.
 
 ```bash
 npm run coverage:pull                       # store → var/coverage-prod.jsonl
-npm run coverage -- var/coverage-prod.jsonl # same report, hosted data
+npm run coverage -- var/coverage-prod.jsonl
 ```
 
-Pulling needs `BLOB_READ_WRITE_TOKEN` in `.env.local`.
+## What is not built
 
-## Core types
+Honest list, kept current in
+[`docs/STATUS-AND-ROADMAP.md`](docs/STATUS-AND-ROADMAP.md):
 
-Nutrition-domain types (`MacroProfile`, `NutritionalStrategy`, validation results)
-live in `src/types/nutrition.ts` and are re-exported by `src/types/recipe.ts`,
-which adds `GourmetRecipe`, `ElevatedRecipe`, `FlavorRadarScores`,
-`CulinaryPhysicsTip`, and the request contracts.
+- **No server persistence.** Saved plates live in `localStorage`, capped at 60.
+  The store interface is async and swappable, but only the browser adapter exists.
+- **One shared password, no accounts.** The gate cookie is an HMAC of a fixed
+  message, so every browser presents the same value. You cannot revoke one person.
+- **No spend ceiling.** No rate limit and no `max_tokens` on generation.
+- **Cooks the engine does not have.** No wok, dough, tortilla, or bake. Pizza,
+  tacos, risotto, ramen, and sushi will miss, and the docs say which and why.
+- **Latency.** A hosted Elevate takes 60–90 seconds.
 
-Macro verification is split the same way: `src/lib/nutrition/foodLines.ts` turns
-food lines into grams and macros with no knowledge of recipes, while
-`src/lib/ai/nutritionRecalc.ts` layers on the recipe-specific policy (per-serving
-division, when to override the model's claimed macros).
+Nutrition output is informational. Aggressive protein-sparing settings sit
+behind an explicit acknowledgement gate (`src/lib/safety.ts`), and the UI
+carries a disclaimer.
