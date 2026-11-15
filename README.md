@@ -158,3 +158,8 @@ Honest list, kept current in
 Nutrition output is informational. Aggressive protein-sparing settings sit
 behind an explicit acknowledgement gate (`src/lib/safety.ts`), and the UI
 carries a disclaimer.
+
+## License
+
+Source-available, not open source. Read it, run it, take the ideas apart —
+but the code and the graph data stay under copyright. See [`LICENSE`](LICENSE).
